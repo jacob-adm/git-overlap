@@ -13,6 +13,7 @@ dependencies = []
 
 [project.scripts]
 git-footprint = "git_overlap.footprint:main"
+git-overlap = "git_overlap.overlap:main"
 
 [tool.setuptools]
 packages = ["git_overlap"]
