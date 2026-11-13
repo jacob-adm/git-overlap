@@ -100,6 +100,19 @@ class OverlapTest(unittest.TestCase):
         proc.stderr.close()
         self.assertEqual((proc.wait(), err), (0, b""))
 
+    def test_empty_with_is_usage_error(self):
+        """--with= and --with "" are exit 2; --with with no value is exit 2 unless -h wins."""
+        for args in (["--with="], ["--with", ""], ["--with"]):
+            code, out, err = self.run_overlap(args, b"a\tA\tp\nb\tA\tp\n")
+            self.assertEqual((code, out), (2, b""), args)
+            self.assertTrue(err.startswith(b"git-overlap: "))
+        self.assertEqual(self.run_overlap(["-h", "--with"], b"")[0], 0)
+
+    def test_unterminated_last_record(self):
+        """A final record without its LF or NUL is accepted."""
+        self.assertEqual(self.run_overlap([], b"a\tA\tp\nb\tA\tp")[:2], (1, b"a\tb\tp\n"))
+        self.assertEqual(self.run_overlap(["-z"], b"a\tA\tp\0b\tA\tp")[:2], (1, b"a\tb\tp\0"))
+
     def test_help_version_and_stray_argument(self):
         """-h exits 0, --version names the command, a positional argument is exit 2."""
         self.assertEqual(self.run_overlap(["-h"], b"")[0], 0)

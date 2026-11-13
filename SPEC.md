@@ -19,6 +19,8 @@ contract: the implementation and the tests are both written from it, separately.
   The command then writes an error naming `-z` to stderr and exits 2. It never quotes or escapes.
   In `-z` mode a path may contain TAB or LF; the TAB inside a field is the caller's problem only for
   refs, which git forbids from containing TAB or LF anyway.
+- **Record errors.** An error about an input record is prefixed `record N: ` (N counted as for
+  malformed input); an error about BASE or an option is not.
 - **Malformed input** (too few fields, or an empty ref or path field) is an error: message with
   the record number (counting every record from 1, skipped empty ones included), exit 2.
 - **Options.** Only the options a command documents are options; any other argument, even one
@@ -50,6 +52,8 @@ contract: the implementation and the tests are both written from it, separately.
   `--version` prints `git-<name> <version>`.
 - A closed stdout (e.g. piping into `head`) ends the command quietly with exit 0, not a traceback.
 - Git runs without a shell, with `LC_ALL=C`, and with `-z` wherever git offers it.
+- git must be an executable named `git` on `PATH` (on Windows a `.cmd`/`.bat` shim alone is not
+  found).
 
 ## git footprint BASE
 
@@ -83,6 +87,9 @@ Reports pairs of refs that touch the same path.
   An empty REF is a usage error (exit 2).
 - Known limit, by design: paths are compared exactly. A file `foo` in one ref and `foo/bar` in
   another are not an overlap here, although `git pairmerge` reports them as a conflict.
+- Known limit, by design: paths and refs are compared bytewise and case-sensitively, as git's
+  trees do. `Foo.txt` in one ref and `foo.txt` in another are not an overlap, even though they
+  collide on a case-insensitive filesystem.
 - Exit 1 if any record is written, else 0. Needs no repository.
 
 ## git pairmerge
@@ -141,7 +148,9 @@ main: `printf 'main\tfeature\n' | git pairmerge`.
   containing the separator (`:` on Unix, `;` on Windows) or starting with `"` is written C-quoted
   in double quotes, as git expects; an existing value from the caller is kept after it. New objects
   land in the temporary directory (made with `tempfile.mkdtemp`), which is removed on normal exit,
-  on error, and on SIGINT, SIGTERM, SIGHUP and SIGPIPE (exit 128 + signal number for a signal).
+  on error, and on SIGINT, SIGTERM and SIGHUP (exit 128 + signal number for a signal). SIGPIPE is
+  not in that list: Python ignores it, so a reader closing the pipe surfaces as EPIPE on a write,
+  which is the quiet exit 0 above, and the directory is removed then too.
   Only SIGKILL can leave it behind. A failure while setting this up is reported as such, never as
   an unknown ref.
 - Version floor for `git pairmerge`: **git 2.43** (`--attr-source` arrived in 2.41; merge-tree

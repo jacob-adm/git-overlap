@@ -29,9 +29,10 @@ def write(repo, path, text):
         handle.write(text)
 
 
-def tool(module, repo, args, stdin):
+def tool(module, repo, args, stdin, extra_env=None):
     """Run `python -m git_overlap.<module>` in `repo`; return (exit code, stdout, stderr)."""
     env = dict(os.environ, PYTHONPATH=ROOT)
+    env.update(extra_env or {})
     proc = subprocess.run([sys.executable, "-m", "git_overlap." + module] + list(args),
                           cwd=repo, env=env, input=stdin,
                           stdout=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -117,12 +118,74 @@ class FootprintTest(unittest.TestCase):
         git(self.repo, "commit", "-q", "-m", "orphan")
         cases = [(["nosuch"], b"feat\n"), (["main"], b"nosuch\n"),
                  (["main"], tree + b"\n"), (["main"], b"lonely\n")]
+        # Errors about a record carry its number; errors about BASE do not.
+        code, _, err = tool("footprint", self.repo, ["main"], b"feat\nlonely\n")
+        self.assertEqual(err, b"git-footprint: record 2: no merge base between BASE and lonely\n")
+        code, _, err = tool("footprint", self.repo, ["nosuch"], b"feat\n")
+        self.assertEqual(err, b"git-footprint: unknown ref or not a commit: nosuch\n")
         for args, stdin in cases:
             code, _, err = tool("footprint", self.repo, args, stdin)
             self.assertEqual(code, 2, (args, stdin))
             self.assertTrue(err.startswith(b"git-footprint: "), err)
             self.assertNotIn(b"Traceback", err)
             self.assertEqual(err.count(b"\n"), 1, err)
+
+    def test_submodule_pointer_change_counts(self):
+        """A gitlink change is listed even when the user's config ignores submodules."""
+        sha = git(self.repo, "rev-parse", "main").strip()
+        git(self.repo, "update-index", "--add", "--cacheinfo", "160000,%s,sub" % sha)
+        git(self.repo, "commit", "-q", "-m", "add gitlink")
+        git(self.repo, "switch", "-q", "-c", "bump")
+        feat = git(self.repo, "rev-parse", "feat").strip()
+        git(self.repo, "update-index", "--cacheinfo", "160000,%s,sub" % feat)
+        git(self.repo, "commit", "-q", "-m", "bump gitlink")
+        git(self.repo, "config", "diff.ignoreSubmodules", "all")
+        code, out, _ = tool("footprint", self.repo, ["main"], b"bump\n")
+        self.assertEqual((code, out), (0, b"bump\tM\tsub\n"))
+
+    def test_ref_must_be_a_single_revision(self):
+        """"^a" and ranges are rejected, as BASE and on stdin; ":/message" is accepted."""
+        for args, stdin in ((["main"], b"^feat\n"), (["main"], b"main..feat\n"),
+                            (["^main"], b"feat\n")):
+            code, _, err = tool("footprint", self.repo, args, stdin)
+            self.assertEqual(code, 2, (args, stdin))
+            self.assertIn(b"unknown ref or not a commit", err)
+        code, out, _ = tool("footprint", self.repo, ["main"], b":/^feat\n")
+        self.assertEqual(code, 0)
+        self.assertTrue(out.startswith(b":/^feat\tD\ta.txt\n"))
+
+    def test_error_names_are_escaped_to_one_line(self):
+        """A ref holding LF or a non-UTF-8 byte is escaped in the one-line error message."""
+        code, _, err = tool("footprint", self.repo, ["-z", "main"], b"no\nsuch\\\xff\0")
+        self.assertEqual(code, 2)
+        self.assertEqual(err, b"git-footprint: record 1: unknown ref or not a commit: "
+                              b"no\\nsuch\\\\\\xff\n")
+
+    def test_unterminated_last_record(self):
+        """A final record without its LF is accepted."""
+        code, out, _ = tool("footprint", self.repo, ["main"], b"main\nfeat")
+        self.assertEqual(code, 0)
+        self.assertEqual(out.count(b"\n"), 4)
+
+    @unittest.skipIf(os.name == "nt", "closing a descriptor with sh redirection is POSIX only")
+    def test_closed_standard_streams(self):
+        """fd 0 or fd 1 not open at all is exit 2 with the SPEC's message."""
+        env = dict(os.environ, PYTHONPATH=ROOT)
+        base = [sys.executable, "-m", "git_overlap.footprint", "main"]
+        for redirect, message in (("<&-", b"standard input is not open"),
+                                  (">&-", b"standard output is not open")):
+            proc = subprocess.run(["sh", "-c", '"$@" ' + redirect, "sh"] + base,
+                                  cwd=self.repo, env=env, stdin=subprocess.PIPE,
+                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            self.assertEqual(proc.returncode, 2, redirect)
+            self.assertEqual(proc.stderr, b"git-footprint: " + message + b"\n")
+
+    def test_help_and_version_take_precedence(self):
+        """-h and --version win over any other argument, even invalid ones."""
+        for args in (["--version", "extra", "more"], ["nosuch", "-h"]):
+            code, out, err = tool("footprint", self.repo, args, b"")
+            self.assertEqual((code, err), (0, b""), args)
+            self.assertTrue(out)
 
     def test_help_and_version(self):
         """-h prints usage and exits 0; --version prints the name and version."""

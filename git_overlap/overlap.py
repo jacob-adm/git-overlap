@@ -10,7 +10,7 @@ import os
 import sys
 
 from ._common import (EXIT_FOUND, EXIT_NOTHING, Fail, check_safe, parse_args, read_records,
-                      run, usage_and_version, write_record)
+                      run, show, usage_and_version, write_record)
 
 NAME = "overlap"
 USAGE = """usage: git overlap [-z] [--with REF] < footprint
@@ -43,11 +43,14 @@ def overlap(argv):
     if usage_and_version(opts, NAME, USAGE):
         return EXIT_NOTHING
     if positionals:
-        raise Fail("unexpected argument: %s (see -h)" % positionals[0])
+        raise Fail("unexpected argument: %s (see -h)" % show(positionals[0]))
     zero = bool(opts.get("-z"))
     # The command line is text; os.fsencode gives back the bytes the caller typed.
     with_ref = os.fsencode(opts["--with"]) if "--with" in opts else None
-    # path -> set of refs that touch it.
+    # An empty REF could never match a ref: it is a usage error, not "nothing found".
+    if with_ref == b"":
+        raise Fail("--with needs a non-empty REF (see -h)")
+    # path -> {ref: number of the first record naming that ref and path}.
     touched = {}
     for number, record in read_records(zero):
         parsed = split_record(record)
@@ -55,7 +58,7 @@ def overlap(argv):
             raise Fail("record %d: expected ref TAB status TAB path, with a non-empty ref and path"
                        % number)
         ref, path = parsed
-        touched.setdefault(path, set()).add(ref)
+        touched.setdefault(path, {}).setdefault(ref, number)
     # A set of (refA, refB, path) writes each duplicate once; a ref never pairs with itself.
     pairs = set()
     for path, refs in touched.items():
@@ -66,8 +69,14 @@ def overlap(argv):
                     pairs.add((ref_a, ref_b, path))
     # Tuples of bytes sort bytewise by (refA, refB, path), as the SPEC requires.
     for pair in sorted(pairs):
-        for field in pair:
-            check_safe(field, zero, "ref or path")
+        ref_a, ref_b, path = pair
+        try:
+            for field in pair:
+                check_safe(field, zero, "ref or path")
+        except Fail as exc:
+            # Name the earliest input record behind this pair (SPEC "Record errors").
+            number = min(touched[path][ref_a], touched[path][ref_b])
+            raise Fail("record %d: %s" % (number, exc))
         write_record(pair, zero)
     return EXIT_FOUND if pairs else EXIT_NOTHING
 

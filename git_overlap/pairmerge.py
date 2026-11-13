@@ -14,8 +14,9 @@ import stat
 import sys
 import tempfile
 
-from ._common import (EXIT_FOUND, EXIT_NOTHING, Fail, check_safe, git, git_error, parse_args,
-                      read_records, resolve, run, show, usage_and_version, write_record)
+from ._common import (EXIT_FOUND, EXIT_NOTHING, OID, Fail, check_safe, git, git_error,
+                      ignore_signals, install_signal_handlers, parse_args, read_records,
+                      resolve, run, show, usage_and_version, write_record)
 
 NAME = "pairmerge"
 USAGE = """usage: git pairmerge [-z] [--attributes FILE] < pairs
@@ -34,8 +35,19 @@ $GIT_DIR/info/attributes, core.attributesFile and configured merge drivers still
 # --attr-source arrived in git 2.41; merge-tree crashed with it until 2.43.
 GIT_FLOOR = (2, 43)
 
-# A tree object id: 40 hex digits (SHA-1) or 64 (SHA-256).
-_OID = re.compile(rb"\A(?:[0-9a-f]{40}|[0-9a-f]{64})\Z")
+# Merge settings pinned to git's documented defaults, so user configuration cannot flip a
+# verdict (SPEC "Merge settings are pinned"). From Documentation/config/merge.txt (identical
+# in git 2.43 and 2.50):
+#   merge.renames          "Defaults to the value of diff.renames", and diff.renames
+#                          (Documentation/config/diff.txt) "Defaults to true".
+#   merge.directoryRenames "Defaults to conflict."
+#   merge.renameLimit      "If not specified, defaults to the value of diff.renameLimit. If
+#                          neither merge.renameLimit nor diff.renameLimit are specified,
+#                          currently defaults to 7000." Setting merge.renameLimit explicitly
+#                          ends that fallback chain, so diff.renameLimit (whose own default,
+#                          1000, applies to diff only) needs no pin.
+PINNED_CONFIG = ("-c", "merge.renames=true", "-c", "merge.directoryRenames=conflict",
+                 "-c", "merge.renameLimit=7000")
 
 
 def check_git_version():
@@ -46,7 +58,7 @@ def check_git_version():
     """
     code, out, err = git(["version"])
     if code != 0:
-        raise Fail("cannot run git version: %s" % git_error(err))
+        raise Fail("cannot run git version: %s" % git_error(err, code))
     match = re.search(rb"git version (\d+)\.(\d+)", out)
     if not match:
         raise Fail("cannot read the git version from %r; git pairmerge needs git %d.%d or later"
@@ -75,22 +87,76 @@ def read_pairs(zero):
     return pairs
 
 
-def private_object_env(tempdir):
-    """Return the environment that sends new objects to `tempdir` and reads the repo's own.
+def c_quote(path):
+    """Quote one GIT_ALTERNATE_OBJECT_DIRECTORIES entry C-style in double quotes.
 
-    The repository's object directory comes from `git rev-parse --git-path objects`, asked
-    before the override so it names the real one, and is made absolute. An alternates list
-    the caller already set is kept after it.
+    git splits that variable on the path separator, but an entry starting with '"' is first
+    unquoted C-style (object-file.c, parse_alt_odb_entry), so a quoted entry may hold the
+    separator. Backslash and '"' get a backslash; control characters become octal escapes.
+    """
+    out = []
+    for char in path:
+        if char in '\\"':
+            out.append("\\" + char)
+        elif ord(char) < 0x20 or ord(char) == 0x7F:
+            out.append("\\%03o" % ord(char))
+        else:
+            out.append(char)
+    return '"' + "".join(out) + '"'
+
+
+def repository_layout():
+    """Return (objects dir, root dir), both absolute, asked before any environment override.
+
+    The objects dir is `git rev-parse --git-path objects` (it honours a caller's own
+    GIT_OBJECT_DIRECTORY). The root is the top of the worktree, or the git directory when
+    there is no worktree (a bare repository, or running inside .git), so that merge-tree,
+    run there, prints root-relative paths.
     """
     code, out, err = git(["rev-parse", "--git-path", "objects"])
     if code != 0:
-        raise Fail(git_error(err))
+        raise Fail("not a git repository: %s" % git_error(err, code))
     objects = os.path.abspath(os.fsdecode(out.rstrip(b"\r\n")))
-    alternates = objects
+    code, out, _ = git(["rev-parse", "--show-toplevel"])
+    root = out.rstrip(b"\r\n")
+    if code != 0 or not root:
+        code, out, err = git(["rev-parse", "--absolute-git-dir"])
+        if code != 0:
+            raise Fail("cannot find the repository root: %s" % git_error(err, code))
+        root = out.rstrip(b"\r\n")
+    return objects, os.fsdecode(root)
+
+
+def private_object_env(tempdir, objects):
+    """Return the environment that sends new objects to `tempdir` and reads `objects`.
+
+    `objects` is C-quoted when it holds the path separator or starts with '"'. An alternates
+    list the caller already set is kept after it.
+    """
+    entry = objects
+    if os.pathsep in entry or entry.startswith('"'):
+        entry = c_quote(entry)
     existing = os.environ.get("GIT_ALTERNATE_OBJECT_DIRECTORIES")
     if existing:
-        alternates = objects + os.pathsep + existing
-    return {"GIT_OBJECT_DIRECTORY": tempdir, "GIT_ALTERNATE_OBJECT_DIRECTORIES": alternates}
+        entry = entry + os.pathsep + existing
+    return {"GIT_OBJECT_DIRECTORY": tempdir, "GIT_ALTERNATE_OBJECT_DIRECTORIES": entry}
+
+
+def check_object_access(env):
+    """Fail, naming the set-up, if the repository's objects are unreadable through `env`.
+
+    Probes one object a ref points at (read without the override) through the private
+    environment, so a broken alternates entry is never reported as an unknown ref. A
+    repository with no refs has nothing to probe.
+    """
+    code, out, _ = git(["for-each-ref", "--count=1", "--format=%(objectname)"])
+    oid = out.strip()
+    if code != 0 or not OID.match(oid):
+        return
+    code, _, err = git(["cat-file", "-e", oid], env)
+    if code != 0:
+        raise Fail("cannot set up the private object directory (repository objects not "
+                   "readable through GIT_ALTERNATE_OBJECT_DIRECTORIES): %s" % git_error(err, code))
 
 
 def attribute_tree(attributes, env):
@@ -108,32 +174,51 @@ def attribute_tree(attributes, env):
             entry = b"100644 blob " + out.strip() + b"\t.gitattributes\0"
             code, out, err = git(["mktree", "-z"], env, entry)
     if code != 0:
-        raise Fail("cannot build the attribute tree: %s" % git_error(err))
+        raise Fail("cannot build the attribute tree: %s" % git_error(err, code))
     return out.strip()
 
 
-def merge(tree, sha_a, sha_b, env, ref_a, ref_b):
+def check_merge_base(sha_a, sha_b, env, ref_a, ref_b):
+    """Fail with "no merge base" if two commits share no history (decided by exit status).
+
+    `git merge-base` exits 1 with no output when there is no common ancestor; checking first
+    means git's own refusal message from merge-tree is never parsed.
+    """
+    code, out, err = git(["merge-base", sha_a, sha_b], env)
+    if code == 1 and not out.strip():
+        raise Fail("no merge base for %s and %s" % (show(ref_a), show(ref_b)))
+    if code != 0:
+        raise Fail("git merge-base failed for %s and %s: %s"
+                   % (show(ref_a), show(ref_b), git_error(err, code)))
+
+
+def merge(tree, sha_a, sha_b, env, root, ref_a, ref_b):
     """Merge two commits in memory; return None if clean, else the sorted conflicted paths.
 
     Clean/conflict is decided by the exit code and the tree id, never by git's messages. A
     conflict with no listed paths returns [b""], written as one record with an empty path.
     """
-    code, out, err = git(["--attr-source=" + os.fsdecode(tree), "merge-tree", "--write-tree",
+    # Run at the repository root, so the paths merge-tree prints are root-relative.
+    code, out, err = git(list(PINNED_CONFIG) +
+                         ["--attr-source=" + os.fsdecode(tree), "merge-tree", "--write-tree",
                           "-z", "--name-only", "--no-messages", "--end-of-options",
-                          sha_a, sha_b], env)
+                          sha_a, sha_b], env, cwd=root)
     if code == 0:
         return None
     # Output is "TREE NUL PATH NUL PATH NUL ..."; a conflict needs a real tree id first.
     fields = out.split(b"\0")
-    if code == 1 and _OID.match(fields[0]):
+    if code == 1 and OID.match(fields[0]):
         paths = sorted(set(path for path in fields[1:] if path != b""))
         return paths or [b""]
     raise Fail("git merge-tree failed for %s and %s: %s"
-               % (show(ref_a), show(ref_b), git_error(err)))
+               % (show(ref_a), show(ref_b), git_error(err, code)))
 
 
 def remove_tree(path):
-    """Delete `path` recursively, first making read-only files writable (Windows needs it)."""
+    """Delete `path` recursively, making read-only files writable first (Windows needs it).
+
+    If anything is left, warn on stderr naming the directory; the exit status is unchanged.
+    """
     for root, dirs, files in os.walk(path):
         for name in dirs + files:
             try:
@@ -141,6 +226,11 @@ def remove_tree(path):
             except OSError:
                 pass
     shutil.rmtree(path, ignore_errors=True)
+    if os.path.exists(path):
+        # Not fatal (the result stands), but the caller should know what was left behind.
+        if sys.stderr is not None:
+            sys.stderr.write("git-%s: warning: could not remove temporary directory %s\n"
+                             % (NAME, show(path)))
 
 
 def pairmerge(argv):
@@ -149,8 +239,10 @@ def pairmerge(argv):
     if usage_and_version(opts, NAME, USAGE):
         return EXIT_NOTHING
     if positionals:
-        raise Fail("unexpected argument: %s (see -h)" % positionals[0])
+        raise Fail("unexpected argument: %s (see -h)" % show(positionals[0]))
     zero = bool(opts.get("-z"))
+    # From here on SIGINT/SIGTERM/SIGHUP unwind through the cleanup below (exit 128 + n).
+    install_signal_handlers()
     check_git_version()
     # FILE is read as bytes, once, before anything else touches git objects.
     attributes = None
@@ -161,9 +253,12 @@ def pairmerge(argv):
         except OSError as exc:
             raise Fail("cannot read --attributes file: %s" % exc)
     pairs = read_pairs(zero)
-    tempdir = tempfile.mkdtemp(prefix="git-pairmerge-")
+    objects, root = repository_layout()
+    tempdir = None
     try:
-        env = private_object_env(tempdir)
+        tempdir = tempfile.mkdtemp(prefix="git-pairmerge-")
+        env = private_object_env(tempdir, objects)
+        check_object_access(env)
         # Check every ref before any merge runs; a ref is resolved once however often used.
         shas = {}
         for number, ref_a, ref_b in pairs:
@@ -176,23 +271,31 @@ def pairmerge(argv):
         tree = attribute_tree(attributes, env)
         seen = set()
         found = False
-        for _, ref_a, ref_b in pairs:
+        for number, ref_a, ref_b in pairs:
             # A pair is the same in either order: process it once, at its first occurrence.
             key = (min(ref_a, ref_b), max(ref_a, ref_b))
             if key in seen:
                 continue
             seen.add(key)
-            paths = merge(tree, shas[ref_a], shas[ref_b], env, ref_a, ref_b)
-            if paths is None:
-                write_record((ref_a, ref_b, b"clean", b""), zero)
-                continue
-            found = True
-            for path in paths:
-                check_safe(path, zero, "path")
-                write_record((ref_a, ref_b, b"conflict", path), zero)
+            try:
+                check_merge_base(shas[ref_a], shas[ref_b], env, ref_a, ref_b)
+                paths = merge(tree, shas[ref_a], shas[ref_b], env, root, ref_a, ref_b)
+                if paths is None:
+                    write_record((ref_a, ref_b, b"clean", b""), zero)
+                    continue
+                found = True
+                for path in paths:
+                    check_safe(path, zero, "path")
+                    write_record((ref_a, ref_b, b"conflict", path), zero)
+            except Fail as exc:
+                # Errors about this pair name its record (SPEC "Record errors").
+                raise Fail("record %d: %s" % (number, exc))
     finally:
-        # The private object directory goes on every exit path, errors included.
-        remove_tree(tempdir)
+        # The private object directory goes on every exit path, errors and signals included;
+        # further signals are ignored so they cannot cut the cleanup short.
+        ignore_signals()
+        if tempdir is not None:
+            remove_tree(tempdir)
     return EXIT_FOUND if found else EXIT_NOTHING
 
 
