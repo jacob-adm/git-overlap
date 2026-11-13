@@ -9,7 +9,7 @@ contract: the implementation and the tests are both written from it, separately.
 - Installed as console scripts `git-footprint`, `git-overlap`, `git-pairmerge`, so `git footprint`
   works on Linux, macOS and Windows. Also runnable as `python3 -m git_overlap.footprint` (etc.).
 - Runs in the repository of the current directory, like any git command. Never changes a ref, the
-  index or the worktree. (`git pairmerge` writes git objects, as `git merge-tree --write-tree` does.)
+  index, the worktree or the object store.
 - **Records.** One record per line (LF). With `-z`, records end with NUL instead, on input and
   output alike. Fields are separated by one TAB. Data is handled as bytes end to end: no decoding,
   no re-encoding.
@@ -19,7 +19,11 @@ contract: the implementation and the tests are both written from it, separately.
   The command then writes an error naming `-z` to stderr and exits 2. It never quotes or escapes.
   In `-z` mode a path may contain TAB or LF; the TAB inside a field is the caller's problem only for
   refs, which git forbids from containing TAB or LF anyway.
-- **Malformed input** (too few fields) is an error: message with the record number, exit 2.
+- **Malformed input** (too few fields, or an empty ref or path field) is an error: message with
+  the record number (counting every record from 1, skipped empty ones included), exit 2.
+- **Options.** Only the options a command documents are options; any other argument, even one
+  starting with `-`, is a positional (so a ref named `-x` works as BASE); `--` is also accepted.
+  A command given an unexpected positional exits 2.
 - **Exit status**, like grep and diff: 0 = ran, nothing found; 1 = ran, something found; 2 = error.
   On exit 2 no partial result is guaranteed; stdout may hold records written before the error.
 - **Errors** go to stderr as one line: `git-<name>: <message>`. Never a traceback.
@@ -49,8 +53,11 @@ pull request's "files changed" shows).
 
 Reports pairs of refs that touch the same path.
 
-- Input: footprint records. The first field is the ref, the LAST field is the path, so both
-  `ref TAB path` and `ref TAB status TAB path` are accepted. Fewer than 2 fields is an error.
+- Input: footprint records, `ref TAB status TAB path`. The ref is everything before the first
+  TAB, the status (any value; ignored) is between the first and second TAB, and the path is
+  everything after the second TAB, so in `-z` mode a path may itself contain TAB. Fewer than 3
+  fields, or an empty ref or path, is an error. There is no 2-field form: one parse rule, no
+  guessing.
 - Output: `refA TAB refB TAB path`, with refA < refB bytewise, one record per shared path. Records
   sorted by (refA, refB, path). A ref never pairs with itself. Duplicates are written once.
 - `--with REF`: only pairs that include REF (REF may print as refA or refB, per the ordering rule).
@@ -72,12 +79,36 @@ main: `printf 'main\tfeature\n' | git pairmerge`.
     sorted bytewise.
 - `--attributes FILE`: merge as if FILE were the repository's `.gitattributes` (e.g.
   `CHANGELOG.md merge=union`), without committing it or changing any repository file. Mechanism and
-  version floor: see the section below.
+  version floor: see the section below. An unreadable FILE is exit 2.
 - Exit 1 if any pair conflicts, else 0; 2 on error (unknown ref, git too old, merge-tree failure).
 
-### --attributes mechanism
+### Merge mechanism (fixed by experiment on git 2.50.1; floors from git release notes)
 
-To be fixed from the git-internals verification (HNET-215). Until then: unspecified.
+- Each ref is first checked with `git rev-parse --verify --quiet --end-of-options REF^{commit}`;
+  failure is exit 2 before any merge runs.
+- Per pair: `git --attr-source=T merge-tree --write-tree -z --name-only --no-messages
+  --end-of-options A B`. Exit 0 = clean. Exit 1 **and** a first NUL field that is a 40- or 64-hex
+  object id = conflict; the remaining fields are the conflicted paths. Anything else (another exit
+  code, or exit 1 with empty stdout, which is how git reports an unmergeable ref) = exit 2.
+- A conflict may list no paths (some directory-rename conflicts). It is then written as one
+  record with an empty path field: `refA TAB refB TAB conflict TAB`. Clean/conflict is decided by
+  the exit code, never by the path list. git's message text is never parsed.
+- **The attribute source is always pinned**, so the result does not depend on what is checked out.
+  Without `--attributes`, T is the empty tree: a plain line merge, as a bare server performs it.
+  With `--attributes FILE`, T is a tree holding FILE (read as bytes) as its root `.gitattributes`.
+  FILE replaces the repository's own `.gitattributes` files; it is not combined with them. To start
+  from the committed ones: `git show main:.gitattributes > f`, edit `f`, pass `--attributes f`.
+- Still honoured, because git gives them precedence or they are user configuration:
+  `$GIT_DIR/info/attributes`, `core.attributesFile`, and merge drivers defined in git config (which
+  is how a syntax-aware driver such as Mergiraf can be evaluated). The README states this.
+- **Nothing is written to the repository.** All git calls of `git pairmerge` run with
+  `GIT_OBJECT_DIRECTORY` set to a private temporary directory and
+  `GIT_ALTERNATE_OBJECT_DIRECTORIES` set to the repository's own object directory (absolute path
+  from `git rev-parse --git-path objects`). New objects land in the temporary directory, which is
+  removed on exit, including on error.
+- Version floor for `git pairmerge`: **git 2.43** (`--attr-source` arrived in 2.41; merge-tree
+  crashed with it until 2.43). The command reads `git version` and exits 2 with a message naming
+  the floor if git is older. `git footprint` and `git overlap` keep the 2.38 floor.
 
 ## Recipes (HNET-216)
 
