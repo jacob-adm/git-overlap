@@ -87,6 +87,20 @@ def read_pairs(zero):
     return pairs
 
 
+# Variables a caller may set to relative paths, which git resolves against its working
+# directory. merge-tree runs at the repository root, so they are made absolute first.
+_PATH_VARIABLES = ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR",
+                   "GIT_OBJECT_DIRECTORY")
+
+
+def absolutise_git_paths():
+    """Make relative GIT_DIR-style variables absolute, relative to our (the caller's) cwd."""
+    for name in _PATH_VARIABLES:
+        value = os.environ.get(name)
+        if value and not os.path.isabs(value):
+            os.environ[name] = os.path.abspath(value)
+
+
 def c_quote(path):
     """Quote one GIT_ALTERNATE_OBJECT_DIRECTORIES entry C-style in double quotes.
 
@@ -253,6 +267,9 @@ def pairmerge(argv):
         except OSError as exc:
             raise Fail("cannot read --attributes file: %s" % exc)
     pairs = read_pairs(zero)
+    # Before any git call that may run elsewhere: relative paths from the caller must not
+    # change meaning when merge-tree runs at the repository root.
+    absolutise_git_paths()
     objects, root = repository_layout()
     tempdir = None
     try:

@@ -191,24 +191,17 @@ class PairmergeTest(unittest.TestCase):
         self.assertEqual(tool("pairmerge", self.repo, [], b"a\tb\na\tc\n", env)[0], 1)
         self.assertEqual(os.listdir(tmp), [])
 
-    @unittest.skipIf(os.name == "nt", "SIGTERM delivery to a child is POSIX only")
-    def test_sigterm_exits_143_and_leaves_no_temp_dir(self):
-        """SIGTERM while waiting on stdin: exit 128 + 15, private temp dir empty."""
-        tmp = tempfile.mkdtemp()
-        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
-        env = dict(os.environ, PYTHONPATH=ROOT, TMPDIR=tmp, TEMP=tmp, TMP=tmp)
-        proc = subprocess.Popen([sys.executable, "-m", "git_overlap.pairmerge"], cwd=self.repo,
-                                env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                                stderr=subprocess.PIPE)
-        proc.stdin.write(b"a\tb\n")
-        proc.stdin.flush()
-        # Give the interpreter time to start and install its handlers before signalling.
-        time.sleep(1.5)
-        proc.send_signal(signal.SIGTERM)
-        out, err = proc.communicate()
-        self.assertEqual((proc.returncode, out, err), (143, b"", b""))
-        self.assertEqual(os.listdir(tmp), [])
-
+    def test_relative_git_environment_from_subdirectory(self):
+        """Relative GIT_DIR, GIT_WORK_TREE and GIT_OBJECT_DIRECTORY still work from a subdir."""
+        sub = os.path.join(self.repo, "other")
+        os.makedirs(sub)
+        before = object_store(self.repo)
+        env = {"GIT_DIR": "../.git", "GIT_WORK_TREE": "..",
+               "GIT_OBJECT_DIRECTORY": os.path.join("..", ".git", "objects")}
+        code, out, err = tool("pairmerge", sub, [], b"a\tb\na\tc\n", env)
+        self.assertEqual((code, out, err),
+                         (1, b"a\tb\tconflict\tCHANGELOG.md\na\tc\tclean\t\n", b""))
+        self.assertEqual(object_store(self.repo), before)
 
     def test_no_merge_base_names_both_refs(self):
         """Unrelated histories: exit 2, `record N: no merge base for A and B`."""
@@ -235,6 +228,92 @@ class PairmergeTest(unittest.TestCase):
         _, err = proc.communicate(b"a\tb\na\tc\nb\tc\n")
         self.assertEqual((proc.returncode, err), (0, b""))
         self.assertEqual(os.listdir(tmp), [])
+
+
+@unittest.skipUnless(HAS_FLOOR, "git pairmerge needs git 2.43 or later")
+@unittest.skipIf(os.name == "nt", "signals and blocked pipes are tested on POSIX only")
+class BlockedWriterTest(unittest.TestCase):
+    """A pair conflicting in many long paths: its output overfills the pipe, so git pairmerge
+    blocks writing while its private object directory exists."""
+
+    COUNT = 1500
+
+    def setUp(self):
+        """Build branches big1 and big2 that edit the same COUNT files differently."""
+        self.repo = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.repo, ignore_errors=True)
+        repo = self.repo
+        git(repo, "init", "-q", "-b", "main")
+        names = ["p/%s%04d" % ("n" * 100, i) for i in range(self.COUNT)]
+        for name in names:
+            write(repo, name, "base\n")
+        git(repo, "add", "p")
+        git(repo, "commit", "-q", "-m", "base")
+        for branch in ("big1", "big2"):
+            git(repo, "switch", "-q", "-c", branch, "main")
+            for name in names:
+                write(repo, name, branch + "\n")
+            git(repo, "commit", "-q", "-am", branch)
+        git(repo, "switch", "-q", "main")
+        # The private TMPDIR whose contents are checked; restored writable before removal.
+        self.tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        self.addCleanup(os.chmod, self.tmp, 0o700)
+
+    def start_blocked(self):
+        """Start git pairmerge on big1/big2, never reading stdout; wait for its temp dir."""
+        env = dict(os.environ, PYTHONPATH=ROOT, TMPDIR=self.tmp, TEMP=self.tmp, TMP=self.tmp)
+        proc = subprocess.Popen([sys.executable, "-m", "git_overlap.pairmerge"], cwd=self.repo,
+                                env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE)
+        self.addCleanup(proc.stderr.close)
+        self.addCleanup(proc.stdout.close)
+        proc.stdin.write(b"big1\tbig2\n")
+        proc.stdin.close()
+        deadline = time.time() + 30
+        while not [n for n in os.listdir(self.tmp) if n.startswith("git-pairmerge-")]:
+            self.assertLess(time.time(), deadline, "no git-pairmerge-* directory appeared")
+            time.sleep(0.05)
+        # Let it get past the merge and fill the pipe: it is then blocked writing.
+        time.sleep(1.0)
+        self.assertIsNone(proc.poll())
+        return proc
+
+    def check_signal(self, name):
+        """Signal the blocked writer: exit 128 + signum, private TMPDIR left empty."""
+        signum = getattr(signal, name)
+        proc = self.start_blocked()
+        proc.send_signal(signum)
+        self.assertEqual(proc.wait(timeout=30), 128 + signum)
+        self.assertEqual(proc.stderr.read(), b"")
+        self.assertEqual(os.listdir(self.tmp), [])
+
+    def test_sigterm(self):
+        """SIGTERM unwinds through the cleanup."""
+        self.check_signal("SIGTERM")
+
+    def test_sigint(self):
+        """SIGINT unwinds through the cleanup."""
+        self.check_signal("SIGINT")
+
+    @unittest.skipUnless(hasattr(signal, "SIGHUP"), "no SIGHUP on this platform")
+    def test_sighup(self):
+        """SIGHUP unwinds through the cleanup."""
+        self.check_signal("SIGHUP")
+
+    @unittest.skipIf(hasattr(os, "geteuid") and os.geteuid() == 0, "root ignores permissions")
+    def test_leftover_temp_dir_is_a_warning(self):
+        """If the temp dir cannot be removed: one warning line naming it, exit status kept."""
+        proc = self.start_blocked()
+        leftover = os.path.join(self.tmp, os.listdir(self.tmp)[0])
+        # The temp dir's contents can still go, but not its own entry in TMPDIR.
+        os.chmod(self.tmp, 0o555)
+        out = proc.stdout.read()
+        self.assertEqual(proc.wait(timeout=30), 1)
+        self.assertEqual(out.count(b"\tconflict\t"), self.COUNT)
+        self.assertEqual(proc.stderr.read(),
+                         b"git-pairmerge: warning: could not remove temporary directory "
+                         + os.fsencode(leftover) + b"\n")
 
 
 @unittest.skipIf(HAS_FLOOR, "only meaningful on git older than 2.43")

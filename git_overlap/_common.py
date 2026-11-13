@@ -150,7 +150,9 @@ def write_stdout(data):
     """Write bytes to stdout; a reader that went away becomes PipeClosed.
 
     EPIPE is the closed pipe; Windows reports the same as EINVAL. Only here, on stdout
-    writes and flushes, are those errors read as "the reader left".
+    writes and flushes, are those errors read as "the reader left". (Not covered by a test:
+    EINVAL from a closed pipe happens only on Windows, and provoking EINVAL from another
+    call, to show it is not misread, would need a mock, which the test rules forbid.)
     """
     try:
         if data is None:
@@ -278,6 +280,12 @@ def _error(name, message):
         sys.stderr.flush()
 
 
+def _discard_stdout():
+    """Point file descriptor 1 at the null device, so leftover buffered output goes nowhere."""
+    devnull = os.open(os.devnull, os.O_WRONLY)
+    os.dup2(devnull, sys.stdout.fileno())
+
+
 def run(name, body):
     """Call body() and exit with its code; map every failure to the SPEC's exit and message.
 
@@ -297,14 +305,15 @@ def run(name, body):
         _error(name, exc)
         code = EXIT_ERROR
     except Interrupted as exc:
+        # Drop unwritten output: the exit-time flush must not block on a reader that stalls.
+        _discard_stdout()
         code = 128 + exc.signum
     except KeyboardInterrupt:
         # SIGINT where no handler was installed: same exit status as a handled one.
         code = 128 + 2
     except PipeClosed:
-        # Point stdout at the null device so Python's exit-time flush stays quiet.
-        devnull = os.open(os.devnull, os.O_WRONLY)
-        os.dup2(devnull, sys.stdout.fileno())
+        # Python's exit-time flush would hit the closed pipe again; send it nowhere instead.
+        _discard_stdout()
         code = EXIT_NOTHING
     except Exception as exc:  # noqa: BLE001 - the SPEC forbids tracebacks
         _error(name, "internal error: %s" % exc)

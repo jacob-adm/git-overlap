@@ -38,7 +38,8 @@ contract: the implementation and the tests are both written from it, separately.
   pipe early (EPIPE, e.g. `| head`) is not an error: exit 0, quietly.
 - **Paths are relative to the repository root**, whatever subdirectory the command runs in, in
   every command's output.
-- **Shallow or unrelated histories.** A missing merge base is an error (exit 2) that says so.
+- **Shallow or unrelated histories.** A missing merge base is an error (exit 2) that says so:
+  the message contains `no merge base` and names the ref(s) concerned (both refs, for a pair).
 - **Determinism.** Same repository state and same input give byte-identical output. Sorting is
   bytewise. Output does not depend on locale, time zone or terminal.
 - **Resolving a ref** (all commands, including BASE): `git rev-parse --verify --end-of-options REF`
