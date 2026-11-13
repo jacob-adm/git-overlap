@@ -107,23 +107,41 @@ def write_record(fields, zero):
     sys.stdout.buffer.write(b"\t".join(fields) + (b"\0" if zero else b"\n"))
 
 
-def git(args):
+def git(args, extra_env=None, data=None):
     """Run git with list args (never a shell) and LC_ALL=C; return (code, stdout, stderr) bytes.
 
     Arguments may be str or bytes; bytes are converted with os.fsdecode, which gives the
-    original bytes back to git on POSIX and UTF-8 on Windows.
+    original bytes back to git on POSIX and UTF-8 on Windows. `extra_env` adds environment
+    variables; `data` (bytes) is fed to git's stdin, which is otherwise empty.
     """
     env = dict(os.environ)
+    env.update(extra_env or {})
     # A fixed locale keeps git's behaviour and messages independent of the user's settings.
     env["LC_ALL"] = "C"
     argv = ["git"] + [os.fsdecode(a) if isinstance(a, bytes) else a for a in args]
+    # subprocess.run refuses stdin= together with input=, so pick exactly one.
+    stdin_kw = {"input": data} if data is not None else {"stdin": subprocess.DEVNULL}
     try:
-        proc = subprocess.run(argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-                              stderr=subprocess.PIPE, env=env)
+        proc = subprocess.run(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env,
+                              **stdin_kw)
     except OSError as exc:
         # git missing from PATH, or not executable.
         raise Fail("cannot run git: %s" % exc)
     return proc.returncode, proc.stdout, proc.stderr
+
+
+def resolve(ref, extra_env=None):
+    """Return the commit SHA (bytes) that `ref` names; Fail if it is unknown or not a commit.
+
+    --end-of-options makes a ref starting with "-" a ref, never an option of rev-parse.
+    """
+    suffix = b"^{commit}" if isinstance(ref, bytes) else "^{commit}"
+    code, out, _ = git(["rev-parse", "--verify", "--quiet", "--end-of-options", ref + suffix],
+                       extra_env)
+    if code != 0:
+        name = show(ref) if isinstance(ref, bytes) else ref
+        raise Fail("unknown ref or not a commit: %s" % name)
+    return out.strip()
 
 
 def git_error(stderr):

@@ -8,7 +8,7 @@ set of files a pull request's "files changed" tab shows. Contract: SPEC.md.
 import sys
 
 from ._common import (EXIT_NOTHING, Fail, check_safe, git, git_error, parse_args,
-                      read_records, run, show, usage_and_version, write_record)
+                      read_records, resolve, run, show, usage_and_version, write_record)
 
 NAME = "footprint"
 USAGE = """usage: git footprint [-z] BASE < refs
@@ -19,19 +19,6 @@ For each ref on stdin, list the files it changes compared with its merge base wi
   -z          records end with NUL instead of LF, on input and output
   -h          show this help
   --version   show the version"""
-
-
-def resolve(ref):
-    """Return the commit SHA (bytes) that `ref` names; Fail if it is unknown or not a commit.
-
-    --end-of-options makes a ref starting with "-" a ref, never an option of rev-parse.
-    """
-    suffix = b"^{commit}" if isinstance(ref, bytes) else "^{commit}"
-    code, out, _ = git(["rev-parse", "--verify", "--quiet", "--end-of-options", ref + suffix])
-    if code != 0:
-        name = show(ref) if isinstance(ref, bytes) else ref
-        raise Fail("unknown ref or not a commit: %s" % name)
-    return out.strip()
 
 
 def merge_base(base_sha, sha, ref):
