@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """git overlap [--with REF]: report pairs of refs that touch the same path.
 
-Reads footprint records (`ref TAB path` or `ref TAB status TAB path`) on stdin and writes
+Reads footprint records (`ref TAB status TAB path`) on stdin and writes
 `refA TAB refB TAB path` records with refA < refB bytewise. Needs no repository.
 Contract: SPEC.md.
 """
@@ -15,8 +15,8 @@ from ._common import (EXIT_FOUND, EXIT_NOTHING, Fail, check_safe, parse_args, re
 NAME = "overlap"
 USAGE = """usage: git overlap [-z] [--with REF] < footprint
 
-Read ref/path records (the first field is the ref, the last the path) and report each pair
-of refs that touch the same path:
+Read git footprint records (ref TAB status TAB path) and report each pair of refs that
+touch the same path:
   refA TAB refB TAB path       (refA < refB bytewise; exit 1 if any, else 0)
 
   --with REF  only pairs that include REF
@@ -24,26 +24,17 @@ of refs that touch the same path:
   -h          show this help
   --version   show the version"""
 
-# Status letters git footprint writes; used to find the path field of a -z record.
-_STATUSES = (b"A", b"M", b"D", b"T")
+def split_record(record):
+    """Return (ref, path) of one `ref TAB status TAB path` record, or None if malformed.
 
-
-def split_record(record, zero):
-    """Return (ref, path) of one record, or None if it has fewer than 2 fields.
-
-    In LF mode the path is the last TAB field (SPEC). In -z mode a path may itself contain
-    TAB, so "last field" would cut it: the path is everything after the ref, or after the
-    status too when the second field is one of git footprint's status letters.
+    One rule in both modes: the ref ends at the first TAB, the status (ignored) at the
+    second, and the path is everything after it, so a -z path may itself contain TAB.
+    Fewer than 3 fields, or an empty ref or path, is malformed.
     """
-    fields = record.split(b"\t")
-    if len(fields) < 2:
+    fields = record.split(b"\t", 2)
+    if len(fields) < 3 or fields[0] == b"" or fields[2] == b"":
         return None
-    if not zero:
-        return fields[0], fields[-1]
-    # Refs cannot contain TAB, so the ref always ends at the first TAB.
-    if len(fields) >= 3 and fields[1] in _STATUSES:
-        return fields[0], record.split(b"\t", 2)[2]
-    return fields[0], record.split(b"\t", 1)[1]
+    return fields[0], fields[2]
 
 
 def overlap(argv):
@@ -59,9 +50,10 @@ def overlap(argv):
     # path -> set of refs that touch it.
     touched = {}
     for number, record in read_records(zero):
-        parsed = split_record(record, zero)
+        parsed = split_record(record)
         if parsed is None:
-            raise Fail("record %d: expected at least 2 TAB-separated fields" % number)
+            raise Fail("record %d: expected ref TAB status TAB path, with a non-empty ref and path"
+                       % number)
         ref, path = parsed
         touched.setdefault(path, set()).add(ref)
     # A set of (refA, refB, path) writes each duplicate once; a ref never pairs with itself.
