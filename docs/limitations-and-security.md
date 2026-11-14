@@ -2,11 +2,11 @@
 
 ## Limitations
 
-- **Exact paths.** `git overlap` compares paths exactly. A file `foo` added on one branch and a
-  file `foo/bar` on another are not an overlap, although `git pairmerge` reports the pair as a
-  conflict. A directory renamed on one branch and a file added to the old directory on another
-  share no path either, and also conflict. To catch these, give `git pairmerge` every pair, as
-  the Measured p recipe does, not only the overlapping ones.
+- **Paths, not content moves.** `git overlap` pairs refs that touch the same path, or a path and
+  a path under it (a file `foo` on one branch and `foo/bar` on another). A directory renamed on
+  one branch and a file added to the old directory on another share no path, yet can conflict.
+  To catch that, give `git pairmerge` every pair, as the Measured p recipe does, not only the
+  overlapping ones.
 - **Case.** Paths and refs are compared bytewise and case-sensitively, as git's trees are.
   `Foo.txt` and `foo.txt` on two branches are not an overlap, although they collide on a
   case-insensitive file system.
