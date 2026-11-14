@@ -80,25 +80,37 @@ def overlap(argv):
                        % number)
         ref, path = parsed
         touched.setdefault(path, {}).setdefault(ref, number)
-    # A set of (refA, refB, path) writes each duplicate once; a ref never pairs with itself.
-    pairs = set()
+    # (refA, refB, path) -> earliest input record behind it. Keys write each duplicate once.
+    pairs = {}
+
+    def add(ref_x, num_x, ref_y, num_y, path):
+        """Record one pair, refA < refB bytewise; a ref never pairs with itself."""
+        if ref_x == ref_y or (with_ref is not None and with_ref not in (ref_x, ref_y)):
+            return
+        key = (min(ref_x, ref_y), max(ref_x, ref_y), path)
+        pairs[key] = min(pairs.get(key, num_x), num_x, num_y)
+
     for path, refs in touched.items():
-        # Sorted, so each pair is built once with refA < refB bytewise.
-        ordered = sorted(refs)
-        for i, ref_a in enumerate(ordered):
-            for ref_b in ordered[i + 1:]:
-                if with_ref is None or with_ref in (ref_a, ref_b):
-                    pairs.add((ref_a, ref_b, path))
+        for ref_a, num_a in refs.items():
+            for ref_b, num_b in refs.items():
+                if ref_a < ref_b:
+                    add(ref_a, num_a, ref_b, num_b, path)
+        # A path under a touched path collides with it (a file `d` against `d/x`): pair them
+        # on the ancestor. Only '/' boundaries count, so `foo` never matches `foobar/x`.
+        parts = path.split(b"/")
+        for depth in range(1, len(parts)):
+            ancestor = b"/".join(parts[:depth])
+            for ref_a, num_a in touched.get(ancestor, {}).items():
+                for ref_b, num_b in refs.items():
+                    add(ref_a, num_a, ref_b, num_b, ancestor)
     # Tuples of bytes sort bytewise by (refA, refB, path), as the SPEC requires.
     for pair in sorted(pairs):
-        ref_a, ref_b, path = pair
         try:
             for field in pair:
                 check_safe(field, zero, "ref or path")
         except Fail as exc:
             # Name the earliest input record behind this pair (SPEC "Record errors").
-            number = min(touched[path][ref_a], touched[path][ref_b])
-            raise Fail("record %d: %s" % (number, exc))
+            raise Fail("record %d: %s" % (pairs[pair], exc))
         write_record(pair, zero)
     return EXIT_FOUND if pairs else EXIT_NOTHING
 
