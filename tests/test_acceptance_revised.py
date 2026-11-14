@@ -136,13 +136,16 @@ class TestErrorEscaping(RevisedTestCase):
             self.assertExactError(proc, unknown("footprint", shown, 1))
 
     def test_non_printable_bytes_escaped(self):
-        """SPEC Errors: any byte that is not printable ASCII is escaped; one printable line."""
+        """SPEC Errors: any byte that is not printable ASCII is escaped; one printable line.
+        SPEC Resolving a ref: on Windows a non-UTF-8 ref cannot be passed to git, and says so."""
         repo, _ = gherkin_repo(self.sb)
         proc = repo.run("footprint", ["-z", "main"], stdin=b"\xff\x01\x1bz\xc3\xa9\0")
         self.assertEqual(proc.returncode, 2)
         self.assertRegex(proc.stderr, PRINTABLE_LINE)
-        self.assertTrue(proc.stderr.startswith(
-            b"git-footprint: record 1: unknown ref or not a commit: "), proc.stderr)
+        message = (b"cannot pass a name that is not valid UTF-8 to git on this platform: "
+                   if os.name == "nt" else b"unknown ref or not a commit: ")
+        self.assertEqual(proc.stderr, b"git-footprint: record 1: " + message
+                         + b"\\xff\\x01\\x1bz\\xc3\\xa9\n")
 
     @needs_pairmerge_git
     def test_pairmerge_escapes_names(self):
@@ -379,6 +382,10 @@ class TestPairmergeRevised(RevisedTestCase):
         probe = subprocess.run(["git", "merge-tree", "--write-tree", "ren", "edit"],
                                cwd=repo.path, env=self.env(hostile), stdout=subprocess.PIPE,
                                stderr=subprocess.PIPE)
+        # Some git versions (seen on 2.43 and 2.47) still detect the rename under
+        # merge.renames=false, so plain git does not conflict and pinning cannot be shown here.
+        if probe.returncode == 0:
+            self.skipTest("this git ignores merge.renames=false in merge-tree; nothing to pin against")
         self.assertEqual(probe.returncode, 1, "fixture must conflict for plain git under the env")
         proc = repo.run("pairmerge", [], stdin=b"ren\tedit\n", env_extra=hostile)
         self.assertEqual(proc.stdout, b"ren\tedit\tclean\t\n", proc.stderr)

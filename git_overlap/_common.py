@@ -271,13 +271,31 @@ def ignore_signals():
             signal.signal(signum, signal.SIG_IGN)
 
 
+def write_stderr_line(text):
+    """Write `text` and one LF to stderr as bytes, if stderr exists.
+
+    Bytes, because a text-mode stderr on Windows turns LF into CR LF, and the SPEC's error
+    is one line ending in LF on every platform.
+    """
+    if sys.stderr is None:
+        return
+    sys.stderr.flush()
+    stream = getattr(sys.stderr, "buffer", None)
+    if stream is None:
+        # A replaced stderr without a byte buffer: text is all it takes.
+        sys.stderr.write(text + "\n")
+        sys.stderr.flush()
+        return
+    encoding = getattr(sys.stderr, "encoding", None) or "utf-8"
+    stream.write((text + "\n").encode(encoding, "backslashreplace"))
+    stream.flush()
+
+
 def _error(name, message):
     """Write `git-<name>: <message>` to stderr as exactly one line, if stderr exists."""
-    if sys.stderr is not None:
-        # Belt and braces: messages are built escaped, but never let one span two lines.
-        message = str(message).replace("\r", "\\r").replace("\n", "\\n")
-        sys.stderr.write("git-%s: %s\n" % (name, message))
-        sys.stderr.flush()
+    # Belt and braces: messages are built escaped, but never let one span two lines.
+    message = str(message).replace("\r", "\\r").replace("\n", "\\n")
+    write_stderr_line("git-%s: %s" % (name, message))
 
 
 def _discard_stdout():
