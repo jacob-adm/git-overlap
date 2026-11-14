@@ -3,7 +3,7 @@
 
 Reads footprint records (`ref TAB status TAB path`) on stdin and writes
 `refA TAB refB TAB path` records with refA < refB bytewise. Needs no repository.
-Contract: SPEC.md.
+SPEC: "git overlap [--with REF]".
 """
 
 import os
@@ -30,7 +30,16 @@ def split_record(record):
     One rule in both modes: the ref ends at the first TAB, the status (ignored) at the
     second, and the path is everything after it, so a -z path may itself contain TAB.
     Fewer than 3 fields, or an empty ref or path, is malformed.
+
+    Args:
+        record: One input record, as bytes.
+
+    Returns:
+        A (ref, path) bytes tuple, or None if the record is malformed.
+
+    SPEC: "git overlap" (Input).
     """
+    # maxsplit=2: any TAB after the second belongs to the path.
     fields = record.split(b"\t", 2)
     if len(fields) < 3 or fields[0] == b"" or fields[2] == b"":
         return None
@@ -38,7 +47,19 @@ def split_record(record):
 
 
 def overlap(argv):
-    """Run the command on argv (without the program name); return the exit code."""
+    """Run git overlap.
+
+    Args:
+        argv: The arguments, without the program name.
+
+    Returns:
+        EXIT_FOUND if any pair was written, else EXIT_NOTHING.
+
+    Raises:
+        Fail: A usage error, a malformed record or an unsafe name.
+
+    SPEC: "git overlap [--with REF]".
+    """
     opts, positionals = parse_args(argv, ("-z", "-h", "--version"), ("--with",))
     if usage_and_version(opts, NAME, USAGE):
         return EXIT_NOTHING
@@ -62,6 +83,7 @@ def overlap(argv):
     # A set of (refA, refB, path) writes each duplicate once; a ref never pairs with itself.
     pairs = set()
     for path, refs in touched.items():
+        # Sorted, so each pair is built once with refA < refB bytewise.
         ordered = sorted(refs)
         for i, ref_a in enumerate(ordered):
             for ref_b in ordered[i + 1:]:
@@ -82,7 +104,13 @@ def overlap(argv):
 
 
 def main():
-    """Console-script entry point: run on sys.argv and exit with the SPEC's status."""
+    """Console-script entry point: run on sys.argv and exit with the SPEC's status.
+
+    Raises:
+        SystemExit: Always (0, 1 or 2).
+
+    SPEC: "Common rules" (console scripts) and "Exit status".
+    """
     run(NAME, lambda: overlap(sys.argv[1:]))
 
 

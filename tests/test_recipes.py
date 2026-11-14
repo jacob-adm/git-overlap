@@ -139,7 +139,7 @@ def readme_recipes():
     nearest "### NAME: QUESTION" heading above it. test_every_recipe_is_checked rejects a block
     without a heading and a heading without a question.
 
-    SPEC: "Recipes"
+    SPEC: "Recipes (HNET-216)".
 
     Returns:
         [(name, question, sh source)]: name is None for a block before any "### " heading;
@@ -171,6 +171,8 @@ def write_wrapper(bin_dir, name, module):
 
     git finds `git-<name>` on PATH for `git <name>`; the wrapper pins PYTHONPATH to this
     checkout so the README is checked against the code beside it, not an installed copy.
+
+    SPEC: "Common rules" (`git footprint` found as `git-footprint` on PATH).
     """
     path = os.path.join(bin_dir, "git-" + name)
     with open(path, "w", newline="\n") as handle:
@@ -180,7 +182,10 @@ def write_wrapper(bin_dir, name, module):
 
 
 def build_fixture(sandbox):
-    """Create the article's night as a real repository: `main` plus agent/a..agent/e (see top)."""
+    """Create the article's night as a real repository: `main` plus agent/a..agent/e (see top).
+
+    SPEC: "Recipes (HNET-216)".
+    """
     repo = Repo(sandbox)
     registry = 'TOOLS = [\n    "search",\n]\n'
     changelog = "# Changelog\n\n## Unreleased\n\n## 1.0.0\n- First release.\n"
@@ -194,17 +199,38 @@ def build_fixture(sandbox):
     }, ref="refs/heads/main")
 
     def add_tool(name):
-        """Return the registry with tool NAME added after "search"."""
+        """Return the registry with NAME added as a set entry.
+
+        Args:
+            name: The tool name to register.
+
+        Returns:
+            The new tools/registry.py text.
+        """
         # Set: one entry per line with a trailing comma, so a union merge stays valid Python.
         return registry.replace('"search",\n', '"search",\n    "%s",\n' % name)
 
     def add_log(entry):
-        """Return the changelog with ENTRY as the first line under "## Unreleased"."""
+        """Return the changelog with ENTRY added under "## Unreleased".
+
+        Args:
+            entry: The changelog line, without its leading "- ".
+
+        Returns:
+            The new CHANGELOG.md text.
+        """
         # Log: every branch writes its line straight under "## Unreleased" (same spot).
         return changelog.replace("## Unreleased\n", "## Unreleased\n- %s\n" % entry)
 
     def add_path(path):
-        """Return openapi.json as the generator writes it with PATH added."""
+        """Return openapi.json regenerated with PATH added.
+
+        Args:
+            path: The endpoint to add, e.g. "/fetch".
+
+        Returns:
+            The new openapi.json text.
+        """
         # Derived: the generator rewrites the "/search" line (adds a comma) and appends a path.
         return openapi.replace('"/search"\n', '"/search",\n    "%s"\n' % path)
 
@@ -226,7 +252,10 @@ def build_fixture(sandbox):
 
 @needs_sh
 class RecipesTest(unittest.TestCase):
-    """README "Recipes" run against the fixture night; stdout must match EXPECTED exactly."""
+    """README "Recipes" run against the fixture night; stdout must match EXPECTED exactly.
+
+    SPEC: "Recipes (HNET-216)".
+    """
 
     @classmethod
     def setUpClass(cls):
@@ -241,7 +270,7 @@ class RecipesTest(unittest.TestCase):
 
     @classmethod
     def tearDownClass(cls):
-        """Remove the sandbox and everything in it."""
+        """Remove the sandbox, fixture repository and wrappers included."""
         cls.sb.cleanup()
 
     def run_recipe(self, heading):
@@ -249,6 +278,8 @@ class RecipesTest(unittest.TestCase):
 
         Recipes that call `git pairmerge` are skipped below its git 2.43 floor. A recipe must
         print nothing on stderr: a failing command inside a pipeline would otherwise go unseen.
+
+        SPEC: "Recipes (HNET-216)".
         """
         source = self.recipes.get(heading)
         self.assertIsNotNone(source, "README has no recipe under '### %s'" % heading)
@@ -263,12 +294,18 @@ class RecipesTest(unittest.TestCase):
         return proc.stdout.decode("utf-8")
 
     def check(self, heading):
-        """Assert the recipe's exact stdout against EXPECTED[heading]."""
+        """Assert the recipe's exact stdout against EXPECTED[heading].
+
+        SPEC: "Recipes (HNET-216)".
+        """
         self.assertEqual(self.run_recipe(heading), EXPECTED[heading])
 
     def test_every_recipe_is_checked(self):
         """Acceptance: "no documented command can drift from the code". Every ```sh block under
-        Recipes sits under its own ### heading and has an expected output here, and vice versa."""
+        Recipes sits under its own ### heading and has an expected output here, and vice versa.
+
+        SPEC: "Recipes (HNET-216)".
+        """
         found = readme_recipes()
         headings = [name for name, _, _ in found]
         self.assertNotIn(None, headings, "a ```sh block in Recipes has no ### heading")
@@ -280,38 +317,62 @@ class RecipesTest(unittest.TestCase):
         self.assertEqual(sorted(headings), sorted(EXPECTED))
 
     def test_footprint(self):
-        """Recipe "Footprint": the files each agent/* branch changes (the night's raw input)."""
+        """Recipe "Footprint": the files each agent/* branch changes (the night's raw input).
+
+        SPEC: "git footprint BASE".
+        """
         self.check("Footprint")
 
     def test_who_overlaps_whom(self):
-        """Recipe "Who overlaps whom": a..d all pair up through CHANGELOG.md; e pairs with none."""
+        """Recipe "Who overlaps whom": a..d all pair up through CHANGELOG.md; e pairs with none.
+
+        SPEC: "git overlap [--with REF]".
+        """
         self.check("Who overlaps whom")
 
     def test_real_conflicts(self):
-        """Recipe "Real conflicts": overlap | pairmerge; the 0002 migrations are no conflict to git."""
+        """Recipe "Real conflicts": overlap | pairmerge; the 0002 migrations are no conflict to git.
+
+        SPEC: "git pairmerge".
+        """
         self.check("Real conflicts")
 
     def test_hotspots(self):
-        """Recipe "Hotspots". Acceptance: "hotspots rank the registry, changelog and openapi.json"."""
+        """Recipe "Hotspots". Acceptance: "hotspots rank the registry, changelog and openapi.json".
+
+        SPEC: "Recipes (HNET-216)".
+        """
         self.check("Hotspots")
 
     def test_measured_p(self):
-        """Recipe "Measured p": conflicting pairs over all n(n-1)/2 pairs, generated by awk."""
+        """Recipe "Measured p": conflicting pairs over all n(n-1)/2 pairs, generated by awk.
+
+        SPEC: "Recipes (HNET-216)".
+        """
         self.check("Measured p")
 
     def test_what_if_merge_drivers(self):
         """Recipe "What-if merge drivers". Acceptance: "union attributes clear the set and log
-        conflicts": registry and CHANGELOG.md vanish, a/c, b/c and c/d turn clean."""
+        conflicts": registry and CHANGELOG.md vanish, a/c, b/c and c/d turn clean.
+
+        SPEC: "Merge mechanism" (`--attributes FILE`).
+        """
         self.check("What-if merge drivers")
 
     def test_derived_files(self):
         """Recipe "Derived files". Acceptance: "derived paths are filtered out as
-        regenerate-not-merge": openapi.json is dropped, the src/app.py conflict stays."""
+        regenerate-not-merge": openapi.json is dropped, the src/app.py conflict stays.
+
+        SPEC: "Recipes (HNET-216)".
+        """
         self.check("Derived files")
 
     def test_sequence_collisions(self):
         """Recipe "Sequence collisions". Acceptance: "two branches adding different files with the
-        same migration number are reported although git sees no conflict"."""
+        same migration number are reported although git sees no conflict".
+
+        SPEC: "Recipes (HNET-216)".
+        """
         self.check("Sequence collisions")
         # "although git sees no conflict": no Real conflicts record names a migration.
         if PAIRMERGE_OK:
@@ -319,7 +380,10 @@ class RecipesTest(unittest.TestCase):
 
     def test_pre_work_check(self):
         """Recipe "Pre-work check": overlap --with's exit status tells agent/a (collision) from
-        agent/e (clear)."""
+        agent/e (clear).
+
+        SPEC: "git overlap [--with REF]" and "Exit status".
+        """
         self.check("Pre-work check")
 
 

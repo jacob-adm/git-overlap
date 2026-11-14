@@ -2,7 +2,7 @@
 """git footprint BASE: list every file each input ref changes since its merge base with BASE.
 
 Reads one ref per record on stdin and writes `ref TAB status TAB path` records, the same
-set of files a pull request's "files changed" tab shows. Contract: SPEC.md.
+set of files a pull request's "files changed" tab shows. SPEC: "git footprint BASE".
 """
 
 import sys
@@ -22,13 +22,28 @@ For each ref on stdin, list the files it changes compared with its merge base wi
 
 
 def merge_base(base_sha, sha, ref):
-    """Return the merge base (bytes) of two commit SHAs; Fail if they share no history."""
+    """Return the merge base of BASE and one ref.
+
+    Args:
+        base_sha: BASE's commit id (bytes).
+        sha: The ref's commit id (bytes).
+        ref: The ref as the caller wrote it, for messages.
+
+    Returns:
+        The merge base commit id (bytes).
+
+    Raises:
+        Fail: The two share no history ("no merge base"), or git merge-base fails.
+
+    SPEC: "Shallow or unrelated histories".
+    """
     code, out, err = git(["merge-base", base_sha, sha])
     # merge-base exits 1 with no output when there is no common ancestor.
     if code == 1 and not out.strip():
         raise Fail("no merge base between BASE and %s" % show(ref))
     if code != 0:
         raise Fail("git merge-base failed for %s: %s" % (show(ref), git_error(err, code)))
+    # Without --all, merge-base prints one best common ancestor; keep just its id.
     return out.split(b"\n")[0].strip()
 
 
@@ -39,7 +54,20 @@ def changed_files(mb, sha):
     External diff drivers and textconv are off: only names are wanted. Paths are relative to
     the repository root whatever diff.relative says, and a submodule pointer change counts
     whatever diff.ignoreSubmodules says.
+
+    Args:
+        mb: The merge base commit id (bytes).
+        sha: The ref's commit id (bytes).
+
+    Returns:
+        A list of (status, path) bytes tuples, sorted by path bytewise.
+
+    Raises:
+        Fail: git diff fails or prints output that is not status/path pairs.
+
+    SPEC: "git footprint BASE" (the pinned diff) and "Determinism".
     """
+    # Each flag overrides a config setting that could otherwise change the file list.
     code, out, err = git(["diff", "--name-status", "-z", "--no-renames", "--no-ext-diff",
                           "--no-textconv", "--no-relative", "--ignore-submodules=none", mb, sha])
     if code != 0:
@@ -48,6 +76,7 @@ def changed_files(mb, sha):
     parts = out.split(b"\0")
     if parts and parts[-1] == b"":
         parts.pop()
+    # An odd count means the output is not status/path pairs: refuse rather than misalign.
     if len(parts) % 2:
         raise Fail("unexpected git diff output")
     pairs = [(parts[i], parts[i + 1]) for i in range(0, len(parts), 2)]
@@ -57,7 +86,19 @@ def changed_files(mb, sha):
 
 
 def footprint(argv):
-    """Run the command on argv (without the program name); return the exit code."""
+    """Run git footprint.
+
+    Args:
+        argv: The arguments, without the program name.
+
+    Returns:
+        EXIT_NOTHING: a footprint is not a finding.
+
+    Raises:
+        Fail: A usage error, an unknown BASE or ref, an unsafe name or no merge base.
+
+    SPEC: "git footprint BASE".
+    """
     opts, positionals = parse_args(argv, ("-z", "-h", "--version"), ())
     if usage_and_version(opts, NAME, USAGE):
         return EXIT_NOTHING
@@ -96,7 +137,13 @@ def footprint(argv):
 
 
 def main():
-    """Console-script entry point: run on sys.argv and exit with the SPEC's status."""
+    """Console-script entry point: run on sys.argv and exit with the SPEC's status.
+
+    Raises:
+        SystemExit: Always (0 or 2).
+
+    SPEC: "Common rules" (console scripts) and "Exit status".
+    """
     run(NAME, lambda: footprint(sys.argv[1:]))
 
 
