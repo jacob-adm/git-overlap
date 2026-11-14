@@ -9,7 +9,7 @@ import tempfile
 import unittest
 
 # Shared helpers, so both implementer suites build repositories and run commands alike.
-from test_impl_footprint import ROOT, git, tool, write
+from test_impl_footprint import ROOT, VERSION, git, tool, write
 
 
 class OverlapTest(unittest.TestCase):
@@ -160,7 +160,7 @@ class OverlapTest(unittest.TestCase):
         SPEC: "Options" and "Standard streams".
         """
         self.assertEqual(self.run_overlap(["-h"], b"")[0], 0)
-        self.assertEqual(self.run_overlap(["--version"], b"")[1], b"git-overlap 0.1.0\n")
+        self.assertEqual(self.run_overlap(["--version"], b"")[1], ("git-overlap %s\n" % VERSION).encode())
         self.assertEqual(self.run_overlap(["main"], b"")[0], 2)
 
 
