@@ -1,9 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
-"""HNET-216: every ```sh block under "## Recipes" in README.md is executed and its stdout checked.
+"""Every ```sh block under "## Recipes" in README.md is executed and its stdout checked.
 
 The fixture repository reproduces the night described by Xuchen Yao, "Rethinking Merging and
-Continuous Integration for Agentic Workflows" (2026): five agent branches off `main`, most of which
-add to the same shared files, one file of each typed-path kind:
+Continous Integration for Agentic Workflows" (4 November 2026): five agent branches off `main`,
+most of which add to the same shared files, one file of each typed-path kind:
 
   tools/registry.py   set       a Python list, one entry per line (with trailing comma)
   CHANGELOG.md        log       each branch adds a line under "## Unreleased"
@@ -57,7 +57,7 @@ def lines(*records):
     return "".join(T.join(fields) + "\n" for fields in records)
 
 
-# --- Expected output of every recipe, keyed by its "### " heading in README.md. ------------------
+# --- Expected output of every recipe, keyed by the NAME of its "### NAME: question?" heading. ---
 # A recipe in the README without an entry here (or an entry without a recipe) fails
 # test_every_recipe_is_checked, so no documented command can go unchecked.
 
@@ -133,29 +133,34 @@ EXPECTED = {
 
 
 def readme_recipes():
-    """Return [(heading, sh source)] for every ```sh block in README.md's "## Recipes" section.
+    """List the ```sh blocks of README.md's "## Recipes" section with their headings.
 
     The section runs from "## Recipes" to the next "## " heading. Each block is attributed to the
-    nearest "### " heading above it; a block before any "### " heading gets heading None, which
-    test_every_recipe_is_checked rejects.
+    nearest "### NAME: QUESTION" heading above it. test_every_recipe_is_checked rejects a block
+    without a heading and a heading without a question.
 
-    SPEC: "Recipes (HNET-216)".
+    SPEC: "Recipes".
+
+    Returns:
+        [(name, question, sh source)]: name is None for a block before any "### " heading;
+        question is None if the heading has no ": ".
     """
     with open(README, "r", encoding="utf-8") as handle:
         text = handle.read()
     match = re.search(r"^## Recipes\n(.*?)(?=^## |\Z)", text, re.M | re.S)
     if not match:
         return []
-    recipes, heading, block = [], None, None
+    recipes, name, question, block = [], None, None, None
     for line in match.group(1).split("\n"):
         if block is not None:                 # inside a fence: collect until the closing ```
             if line.startswith("```"):
-                recipes.append((heading, "\n".join(block) + "\n"))
+                recipes.append((name, question, "\n".join(block) + "\n"))
                 block = None
             else:
                 block.append(line)
         elif line.startswith("### "):
-            heading = line[4:].strip()
+            name, _, question = line[4:].strip().partition(": ")
+            question = question or None
         elif line.startswith("```sh"):
             block = []
     return recipes
@@ -179,7 +184,7 @@ def write_wrapper(bin_dir, name, module):
 def build_fixture(sandbox):
     """Create the article's night as a real repository: `main` plus agent/a..agent/e (see top).
 
-    SPEC: "Recipes (HNET-216)".
+    SPEC: "Recipes".
     """
     repo = Repo(sandbox)
     registry = 'TOOLS = [\n    "search",\n]\n'
@@ -249,7 +254,7 @@ def build_fixture(sandbox):
 class RecipesTest(unittest.TestCase):
     """README "Recipes" run against the fixture night; stdout must match EXPECTED exactly.
 
-    SPEC: "Recipes (HNET-216)".
+    SPEC: "Recipes".
     """
 
     @classmethod
@@ -261,7 +266,7 @@ class RecipesTest(unittest.TestCase):
         cls.bin = cls.sb.mkdir("bin")
         for name in ("footprint", "overlap", "pairmerge"):
             write_wrapper(cls.bin, name, name)
-        cls.recipes = dict((heading, source) for heading, source in readme_recipes())
+        cls.recipes = dict((name, source) for name, _, source in readme_recipes())
 
     @classmethod
     def tearDownClass(cls):
@@ -274,7 +279,7 @@ class RecipesTest(unittest.TestCase):
         Recipes that call `git pairmerge` are skipped below its git 2.43 floor. A recipe must
         print nothing on stderr: a failing command inside a pipeline would otherwise go unseen.
 
-        SPEC: "Recipes (HNET-216)".
+        SPEC: "Recipes".
         """
         source = self.recipes.get(heading)
         self.assertIsNotNone(source, "README has no recipe under '### %s'" % heading)
@@ -291,7 +296,7 @@ class RecipesTest(unittest.TestCase):
     def check(self, heading):
         """Assert the recipe's exact stdout against EXPECTED[heading].
 
-        SPEC: "Recipes (HNET-216)".
+        SPEC: "Recipes".
         """
         self.assertEqual(self.run_recipe(heading), EXPECTED[heading])
 
@@ -299,11 +304,15 @@ class RecipesTest(unittest.TestCase):
         """Acceptance: "no documented command can drift from the code". Every ```sh block under
         Recipes sits under its own ### heading and has an expected output here, and vice versa.
 
-        SPEC: "Recipes (HNET-216)".
+        SPEC: "Recipes".
         """
         found = readme_recipes()
-        headings = [heading for heading, _ in found]
+        headings = [name for name, _, _ in found]
         self.assertNotIn(None, headings, "a ```sh block in Recipes has no ### heading")
+        for name, question, _ in found:
+            # The owner's rule: each recipe heading says which question it answers.
+            self.assertTrue(question and question.endswith("?"),
+                            "heading '### %s' must read '### NAME: question?'" % name)
         self.assertEqual(len(headings), len(set(headings)), "one ```sh block per ### heading")
         self.assertEqual(sorted(headings), sorted(EXPECTED))
 
@@ -331,14 +340,14 @@ class RecipesTest(unittest.TestCase):
     def test_hotspots(self):
         """Recipe "Hotspots". Acceptance: "hotspots rank the registry, changelog and openapi.json".
 
-        SPEC: "Recipes (HNET-216)".
+        SPEC: "Recipes".
         """
         self.check("Hotspots")
 
     def test_measured_p(self):
         """Recipe "Measured p": conflicting pairs over all n(n-1)/2 pairs, generated by awk.
 
-        SPEC: "Recipes (HNET-216)".
+        SPEC: "Recipes".
         """
         self.check("Measured p")
 
@@ -354,7 +363,7 @@ class RecipesTest(unittest.TestCase):
         """Recipe "Derived files". Acceptance: "derived paths are filtered out as
         regenerate-not-merge": openapi.json is dropped, the src/app.py conflict stays.
 
-        SPEC: "Recipes (HNET-216)".
+        SPEC: "Recipes".
         """
         self.check("Derived files")
 
@@ -362,7 +371,7 @@ class RecipesTest(unittest.TestCase):
         """Recipe "Sequence collisions". Acceptance: "two branches adding different files with the
         same migration number are reported although git sees no conflict".
 
-        SPEC: "Recipes (HNET-216)".
+        SPEC: "Recipes".
         """
         self.check("Sequence collisions")
         # "although git sees no conflict": no Real conflicts record names a migration.
