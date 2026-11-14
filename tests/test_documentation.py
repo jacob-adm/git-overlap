@@ -10,6 +10,7 @@ import ast
 import io
 import os
 import re
+import subprocess
 import tokenize
 import unittest
 
@@ -51,23 +52,32 @@ _TRACKER_REF = re.compile(
 
 
 def shipped_text_files():
-    """List the text files that ship in the repository: docs, code, tests and configuration.
+    """List the text files that ship in the repository: every tracked file except LICENSE.
+
+    The list comes from `git ls-files` run at ROOT, so docs/ and any future folder are covered.
+    Without git (or outside a work tree, e.g. an unpacked archive) it walks the tree instead,
+    skipping .git, bytecode caches and compiled files. LICENSE is excluded: it is the
+    unmodified Apache text.
 
     Returns:
-        Sorted paths relative to ROOT: README.md, SPEC.md, pyproject.toml, every file under
-        git_overlap/, tests/ and .github/ (compiled caches excluded). LICENSE is excluded: it is
-        the unmodified Apache text.
+        Sorted paths relative to ROOT, with "/" as separator.
     """
-    found = [name for name in ("README.md", "SPEC.md", "pyproject.toml")
-             if os.path.exists(os.path.join(ROOT, name))]
-    for folder in ("git_overlap", "tests", ".github"):
-        for parent, dirs, names in os.walk(os.path.join(ROOT, folder)):
-            # Bytecode caches are build output, not shipped text.
-            dirs[:] = [d for d in dirs if d != "__pycache__"]
+    try:
+        proc = subprocess.run(["git", "ls-files", "-z"], cwd=ROOT, stdout=subprocess.PIPE,
+                              stderr=subprocess.DEVNULL)
+        tracked = proc.stdout.decode("utf-8").split("\0") if proc.returncode == 0 else None
+    except OSError:
+        tracked = None                       # no git on PATH
+    if tracked is None:
+        tracked = []
+        for parent, dirs, names in os.walk(ROOT):
+            # Repository metadata and bytecode caches are not shipped text.
+            dirs[:] = [d for d in dirs if d not in (".git", "__pycache__")]
             for name in names:
                 if not name.endswith(".pyc"):
-                    found.append(os.path.relpath(os.path.join(parent, name), ROOT))
-    return sorted(found)
+                    relpath = os.path.relpath(os.path.join(parent, name), ROOT)
+                    tracked.append(relpath.replace(os.sep, "/"))
+    return sorted(name for name in tracked if name and name != "LICENSE")
 
 
 def read_source(relpath):
@@ -185,7 +195,8 @@ class TestDocumentation(unittest.TestCase):
         """
         found = []
         for relpath in shipped_text_files():
-            with open(os.path.join(ROOT, relpath), encoding="utf-8", errors="replace") as handle:
+            path = os.path.join(ROOT, *relpath.split("/"))
+            with open(path, encoding="utf-8", errors="replace") as handle:
                 for number, line in enumerate(handle, 1):
                     # Report every hit with its location, so one run shows them all.
                     for match in _TRACKER_REF.finditer(line):

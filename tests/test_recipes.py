@@ -1,5 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Every ```sh block under "## Recipes" in README.md is executed and its stdout checked.
+"""Every recipe (a ```sh block in a "Recipes" section of README.md or docs/*.md) runs, checked.
+
+A "Recipes" section starts at a heading reading exactly "Recipes" (any level, e.g. "## Recipes"
+in README.md or "# Recipes" in docs/recipes.md) and runs to the next heading of the same or a
+higher level. Each recipe sits under its own deeper heading, "NAME: question?".
 
 The fixture repository reproduces the night described by Xuchen Yao, "Rethinking Merging and
 Continous Integration for Agentic Workflows" (4 November 2026): five agent branches off `main`,
@@ -40,9 +44,12 @@ import unittest
 from fixtures import PAIRMERGE_OK, Repo, Sandbox
 
 # This checkout's root (not fixtures.PACKAGE_ROOT, which defaults to one fixed path): the code
-# under test is the code next to this README.
+# under test is the code next to these docs.
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-README = os.path.join(ROOT, "README.md")
+DOCS = "docs"
+
+# A Markdown ATX heading: its level (number of #) and its text.
+HEADING = re.compile(r"^(#{1,6}) (.*)$")
 
 # `sh` runs the recipes. On Windows it exists only under Git Bash (or similar); without it the
 # recipe tests are skipped rather than failed, since the recipes are documented as POSIX sh.
@@ -57,8 +64,8 @@ def lines(*records):
     return "".join(T.join(fields) + "\n" for fields in records)
 
 
-# --- Expected output of every recipe, keyed by the NAME of its "### NAME: question?" heading. ---
-# A recipe in the README without an entry here (or an entry without a recipe) fails
+# --- Expected output of every recipe, keyed by the NAME of its "NAME: question?" heading. -----
+# A documented recipe without an entry here (or an entry without a recipe) fails
 # test_every_recipe_is_checked, so no documented command can go unchecked.
 
 FOOTPRINT = lines(
@@ -132,37 +139,92 @@ EXPECTED = {
 }
 
 
-def readme_recipes():
-    """List the ```sh blocks of README.md's "## Recipes" section with their headings.
+def doc_files():
+    """List the documentation files whose examples are checked: README.md, then docs/*.md.
 
-    The section runs from "## Recipes" to the next "## " heading. Each block is attributed to the
-    nearest "### NAME: QUESTION" heading above it. test_every_recipe_is_checked rejects a block
-    without a heading and a heading without a question.
+    Returns:
+        Paths relative to ROOT, with "/" as separator (they are only displayed and joined).
+    """
+    folder = os.path.join(ROOT, DOCS)
+    names = sorted(n for n in os.listdir(folder) if n.endswith(".md")) \
+        if os.path.isdir(folder) else []
+    return ["README.md"] + [DOCS + "/" + name for name in names]
+
+
+def doc_fences(relpath):
+    """Split one documentation file into its fenced blocks.
+
+    Args:
+        relpath: The file, relative to ROOT, as doc_files lists it.
+
+    Returns:
+        (fences, lines): `lines` is the file split on LF; `fences` is a list of dicts, in order,
+        with keys info (the text after ```), start and end (1-based line numbers of the opening
+        and closing fence), body (the lines between, each ending in LF) and recipe: None outside
+        a Recipes section, else (name, question) of the nearest heading above the block inside
+        that section, (None, None) if there is none and question None if the heading has no
+        ": ".
+
+    Raises:
+        AssertionError: a fence is indented or never closed.
+    """
+    with open(os.path.join(ROOT, *relpath.split("/")), "r", encoding="utf-8") as handle:
+        lines = handle.read().split("\n")
+    fences, open_fence = [], None
+    recipes_level, recipe = None, None     # the open Recipes section's level; current heading
+    for number, line in enumerate(lines, 1):
+        if open_fence is not None:
+            # Inside a fence: collect lines until the closing ```; a "#" here is sh, not Markdown.
+            if line.startswith("```"):
+                body = open_fence.pop("lines")
+                open_fence.update(end=number, body="".join(text + "\n" for text in body))
+                fences.append(open_fence)
+                open_fence = None
+            else:
+                open_fence["lines"].append(line)
+            continue
+        # An indented fence (e.g. inside a list item) would slip past the checks.
+        if line.lstrip().startswith("```") and not line.startswith("```"):
+            raise AssertionError("%s line %d: indented fence; examples must start in column 1 "
+                                 "to be checked" % (relpath, number))
+        heading = HEADING.match(line)
+        if heading:
+            level, title = len(heading.group(1)), heading.group(2).strip()
+            # A heading of the same or a higher level closes the Recipes section.
+            if recipes_level is not None and level <= recipes_level:
+                recipes_level = None
+            if recipes_level is None:
+                if title == "Recipes":
+                    recipes_level, recipe = level, (None, None)
+            else:
+                name, _, question = title.partition(": ")
+                recipe = (name, question or None)
+        elif line.startswith("```"):
+            open_fence = {"info": line[3:].strip(), "start": number, "lines": [],
+                          "recipe": recipe if recipes_level is not None else None}
+    if open_fence is not None:
+        raise AssertionError("%s line %d: fence never closed" % (relpath, open_fence["start"]))
+    return fences, lines
+
+
+def doc_recipes():
+    """List the recipes of README.md and docs/*.md: every ```sh block in a Recipes section.
+
+    test_every_recipe_is_checked rejects a block without a heading and a heading without a
+    question.
 
     SPEC: "Recipes".
 
     Returns:
-        [(name, question, sh source)]: name is None for a block before any "### " heading;
-        question is None if the heading has no ": ".
+        [(name, question, sh source)]: name is None for a block before any heading inside the
+        section; question is None if the heading has no ": ".
     """
-    with open(README, "r", encoding="utf-8") as handle:
-        text = handle.read()
-    match = re.search(r"^## Recipes\n(.*?)(?=^## |\Z)", text, re.M | re.S)
-    if not match:
-        return []
-    recipes, name, question, block = [], None, None, None
-    for line in match.group(1).split("\n"):
-        if block is not None:                 # inside a fence: collect until the closing ```
-            if line.startswith("```"):
-                recipes.append((name, question, "\n".join(block) + "\n"))
-                block = None
-            else:
-                block.append(line)
-        elif line.startswith("### "):
-            name, _, question = line[4:].strip().partition(": ")
-            question = question or None
-        elif line.startswith("```sh"):
-            block = []
+    recipes = []
+    for relpath in doc_files():
+        fences, _ = doc_fences(relpath)
+        # Only ```sh blocks are recipes; any other fence is checked by test_readme's rules.
+        recipes.extend(fence["recipe"] + (fence["body"],) for fence in fences
+                       if fence["info"] == "sh" and fence["recipe"] is not None)
     return recipes
 
 
@@ -170,7 +232,7 @@ def write_wrapper(bin_dir, name, module):
     """Write `bin_dir/git-<name>`: an sh script running `python -m git_overlap.<module>`.
 
     git finds `git-<name>` on PATH for `git <name>`; the wrapper pins PYTHONPATH to this
-    checkout so the README is checked against the code beside it, not an installed copy.
+    checkout so the docs are checked against the code beside it, not an installed copy.
 
     SPEC: "Common rules" (`git footprint` found as `git-footprint` on PATH).
     """
@@ -252,7 +314,7 @@ def build_fixture(sandbox):
 
 @needs_sh
 class RecipesTest(unittest.TestCase):
-    """README "Recipes" run against the fixture night; stdout must match EXPECTED exactly.
+    """The documented recipes run against the fixture night; stdout must match EXPECTED exactly.
 
     SPEC: "Recipes".
     """
@@ -266,7 +328,7 @@ class RecipesTest(unittest.TestCase):
         cls.bin = cls.sb.mkdir("bin")
         for name in ("footprint", "overlap", "pairmerge"):
             write_wrapper(cls.bin, name, name)
-        cls.recipes = dict((name, source) for name, _, source in readme_recipes())
+        cls.recipes = dict((name, source) for name, _, source in doc_recipes())
 
     @classmethod
     def tearDownClass(cls):
@@ -274,7 +336,7 @@ class RecipesTest(unittest.TestCase):
         cls.sb.cleanup()
 
     def run_recipe(self, heading):
-        """Run the README recipe under HEADING with `sh -c` in the fixture; return its stdout.
+        """Run the documented recipe under HEADING with `sh -c` in the fixture; return its stdout.
 
         Recipes that call `git pairmerge` are skipped below its git 2.43 floor. A recipe must
         print nothing on stderr: a failing command inside a pipeline would otherwise go unseen.
@@ -282,7 +344,7 @@ class RecipesTest(unittest.TestCase):
         SPEC: "Recipes".
         """
         source = self.recipes.get(heading)
-        self.assertIsNotNone(source, "README has no recipe under '### %s'" % heading)
+        self.assertIsNotNone(source, "no documented recipe under the heading '%s'" % heading)
         if "pairmerge" in source and not PAIRMERGE_OK:
             self.skipTest("git pairmerge needs git >= 2.43")
         env = dict(self.sb.env)
@@ -302,18 +364,18 @@ class RecipesTest(unittest.TestCase):
 
     def test_every_recipe_is_checked(self):
         """Acceptance: "no documented command can drift from the code". Every ```sh block under
-        Recipes sits under its own ### heading and has an expected output here, and vice versa.
+        Recipes sits under its own heading and has an expected output here, and vice versa.
 
         SPEC: "Recipes".
         """
-        found = readme_recipes()
+        found = doc_recipes()
         headings = [name for name, _, _ in found]
-        self.assertNotIn(None, headings, "a ```sh block in Recipes has no ### heading")
+        self.assertNotIn(None, headings, "a ```sh block in Recipes has no heading of its own")
         for name, question, _ in found:
             # The owner's rule: each recipe heading says which question it answers.
             self.assertTrue(question and question.endswith("?"),
-                            "heading '### %s' must read '### NAME: question?'" % name)
-        self.assertEqual(len(headings), len(set(headings)), "one ```sh block per ### heading")
+                            "heading '%s' must read 'NAME: question?'" % name)
+        self.assertEqual(len(headings), len(set(headings)), "one ```sh block per recipe heading")
         self.assertEqual(sorted(headings), sorted(EXPECTED))
 
     def test_footprint(self):
