@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Clean-room acceptance tests for `git overlap [--with REF]`, written from SPEC.md only.
 
 Each docstring names the SPEC.md clause it checks. The command is run as a black box
@@ -7,6 +8,7 @@ because SPEC says overlap needs no repository. Input records are `ref TAB status
 import re
 import unittest
 
+# Imported as a top-level module: unittest discovery puts tests/ on sys.path.
 from fixtures import Repo, Sandbox, assert_error, closed_stdout_run, gherkin_repo
 
 NAME = "overlap"
@@ -14,30 +16,67 @@ NAME = "overlap"
 
 def recno(n):
     """Regex matching record number N as a whole number in the error line."""
+    # Lookarounds, so record 2 is not matched inside 12 or 20.
     return re.compile(rb"(?<![0-9])" + str(n).encode() + rb"(?![0-9])")
 
 
 class OverlapTestCase(unittest.TestCase):
+    """Base case: a fresh sandbox per test, with overlap run outside any repository."""
     def setUp(self):
+        """Create the sandbox and an empty directory that is not a git repository.
+
+        SPEC: "git overlap" (needs no repository).
+        """
         self.sb = Sandbox()
         self.addCleanup(self.sb.cleanup)
+        # Overlap must not need git: run where repository discovery finds nothing.
         self.cwd = self.sb.mkdir("no-repo-here")
 
     def ov(self, args, stdin, env_extra=None):
+        """Run git overlap in the no-repository directory.
+
+        Args:
+            args: Command-line arguments.
+            stdin: Input bytes.
+            env_extra: Extra environment variables, or None.
+
+        Returns:
+            The finished subprocess.CompletedProcess.
+        """
         return self.sb.run_cmd(NAME, args, stdin=stdin, cwd=self.cwd, env_extra=env_extra)
 
     def assertFound(self, proc, expected):
+        """Assert stdout is exactly `expected` and the exit status is 1.
+
+        Args:
+            proc: The finished process.
+            expected: The exact stdout bytes.
+
+        SPEC: "Exit status" (1 = something found).
+        """
+        # stderr goes in the message: it explains an unexpected exit far better than a diff.
         self.assertEqual(proc.stdout, expected, "stderr=%r" % (proc.stderr,))
         self.assertEqual(proc.returncode, 1, "exit 1 when any record is written; stderr=%r"
                          % (proc.stderr,))
 
     def assertNothing(self, proc):
+        """Assert stdout is empty and the exit status is 0.
+
+        Args:
+            proc: The finished process.
+
+        SPEC: "Exit status" (0 = nothing found).
+        """
         self.assertEqual(proc.stdout, b"", "stderr=%r" % (proc.stderr,))
         self.assertEqual(proc.returncode, 0, "exit 0 when nothing is written; stderr=%r"
                          % (proc.stderr,))
 
 
 class TestPairs(OverlapTestCase):
+    """Which pairs are reported, in what order.
+
+    SPEC: "git overlap" (Output).
+    """
     def test_gherkin_case(self):
         """SPEC overlap: Given a and b both touch x.py and c touches only w.py, Then stdout is exactly
         `a TAB b TAB x.py` and exit is 1."""
@@ -47,26 +86,32 @@ class TestPairs(OverlapTestCase):
 
     def test_status_is_ignored(self):
         """SPEC overlap Input: the status field may hold any value (even empty) and is ignored."""
+        # An empty status (b's record) is still three fields: two TABs.
         proc = self.ov([], b"a\tWHATEVER\tx.py\nb\t\tx.py\nc\tM\tw.py\n")
         self.assertFound(proc, b"a\tb\tx.py\n")
 
     def test_pair_order_bytewise_and_output_sorted(self):
         """SPEC overlap Output: refA < refB bytewise; records sorted by (refA, refB, path) bytewise,
         regardless of input order and locale."""
+        # Upper case sorts before "_" before lower case before UTF-8 bytes in bytewise order,
+        # which a locale-aware sort would not keep.
         stdin = (b"a\tA\t\xc3\xa9.py\n" b"a\tM\tX.py\n" b"_\tD\ta.py\n" b"B\tM\ta.py\n"
                  b"a\tT\ta.py\n" b"B\tA\tX.py\n" b"_\tM\t\xc3\xa9.py\n")
         expected = (b"B\t_\ta.py\n" b"B\ta\tX.py\n" b"B\ta\ta.py\n"
                     b"_\ta\ta.py\n" b"_\ta\t\xc3\xa9.py\n")
+        # A UTF-8 locale for the caller: the tool must still sort bytewise.
         proc = self.ov([], stdin, env_extra={"LC_ALL": "en_US.UTF-8", "LANG": "en_US.UTF-8"})
         self.assertFound(proc, expected)
 
     def test_three_refs_share_one_path(self):
         """SPEC overlap Output: one record per shared path for every pair of distinct refs."""
+        # Refs in reverse order, so the output order is the tool's, not the input's.
         proc = self.ov([], b"c\tM\tx\nb\tM\tx\na\tM\tx\n")
         self.assertFound(proc, b"a\tb\tx\na\tc\tx\nb\tc\tx\n")
 
     def test_never_self_pair(self):
         """SPEC overlap Output: a ref never pairs with itself."""
+        # One ref listing the same path three times must not pair with itself.
         proc = self.ov([], b"a\tM\tx.py\na\tD\tx.py\na\tA\tx.py\nb\tM\ty.py\n")
         self.assertNothing(proc)
 
@@ -88,12 +133,18 @@ class TestPairs(OverlapTestCase):
     def test_works_outside_any_repository(self):
         """SPEC overlap: needs no repository (cwd is an empty dir, discovery stopped by
         GIT_CEILING_DIRECTORIES, GIT_DIR pointing nowhere) and still finds pairs."""
+        # A GIT_DIR pointing nowhere would make any git call fail, proving none is made.
         proc = self.sb.run_cmd(NAME, [], stdin=b"a\tM\tx\nb\tM\tx\n", cwd=self.cwd,
                                env_extra={"GIT_DIR": self.cwd + "/nonexistent-git-dir"})
         self.assertFound(proc, b"a\tb\tx\n")
 
 
 class TestWith(OverlapTestCase):
+    """Filtering with --with REF.
+
+    SPEC: "git overlap [--with REF]".
+    """
+    # a, b and c share x; b and c also share y: each REF sees a different subset.
     STDIN = b"c\tM\tx\nb\tM\tx\na\tM\tx\nb\tM\ty\nc\tM\ty\n"
 
     def test_with_ref_as_refA_and_refB(self):
@@ -120,10 +171,15 @@ class TestWith(OverlapTestCase):
         """SPEC common Refs + Options: a REF starting with `-` after --with is a ref, not an option."""
         stdin = b"-x\tM\tf\nb\tM\tf\nc\tM\tg\nb\tM\tg\n"
         self.assertFound(self.ov(["--with", "-x"], stdin), b"-x\tb\tf\n")
+        # The --with=REF spelling must give the same result as the two-argument one.
         self.assertFound(self.ov(["--with=-x"], stdin), b"-x\tb\tf\n")
 
 
 class TestRecordsAndModes(OverlapTestCase):
+    """Record parsing, malformed input, unsafe names and -z mode.
+
+    SPEC: "Records", "Input tolerance", "Unsafe names", "Malformed input".
+    """
     def test_two_field_input_is_error(self):
         """SPEC overlap Input: there is no 2-field form; fewer than 3 fields is an error naming the
         record number (2); exit 2."""
@@ -138,6 +194,7 @@ class TestRecordsAndModes(OverlapTestCase):
     def test_record_number_counts_skipped_empty_records(self):
         """SPEC common Malformed input: record numbers count every record from 1, skipped empty
         ones included (LF: record 4; -z: record 3)."""
+        # Two empty records come first, so a count that skipped them would say 2, not 4.
         proc = self.ov([], b"\n\na\tM\tx\nb\tx\n")
         assert_error(self, proc, NAME, must_contain=recno(4))
         proc = self.ov(["-z"], b"\0a\tM\tx\0b\tx\0")
@@ -161,6 +218,7 @@ class TestRecordsAndModes(OverlapTestCase):
     def test_path_is_everything_after_second_tab_z(self):
         """SPEC overlap Input: the path is everything after the second TAB, so in -z mode a path may
         itself contain TAB (and is written raw)."""
+        # Only the first two TABs split fields; the third TAB belongs to the path.
         proc = self.ov(["-z"], b"a\tM\tp\tq.py\0b\tA\tp\tq.py\0c\tM\tq.py\0")
         self.assertFound(proc, b"a\tb\tp\tq.py\0")
 
@@ -177,6 +235,7 @@ class TestRecordsAndModes(OverlapTestCase):
 
     def test_empty_records_skipped(self):
         """SPEC common Input tolerance: empty records are skipped (LF incl. CR-only, and -z)."""
+        # A lone CR becomes an empty record once its CR is removed, so it is skipped too.
         self.assertFound(self.ov([], b"\n\na\tM\tx\n\n\r\nb\tM\tx\n\n"), b"a\tb\tx\n")
         self.assertFound(self.ov(["-z"], b"\0a\tM\tx\0\0b\tM\tx\0\0"), b"a\tb\tx\0")
 
@@ -199,6 +258,7 @@ class TestRecordsAndModes(OverlapTestCase):
         naming `-z`, exit 2, never quoted or escaped."""
         proc = self.ov([], b"a\tM\tx\ry.py\nb\tM\tx\ry.py\n")
         assert_error(self, proc, NAME, must_contain=b"-z")
+        # Only one trailing CR is removed; the second stays in the path and is unsafe.
         proc = self.ov([], b"a\tM\tx.py\r\r\nb\tM\tx.py\r\r\n")
         assert_error(self, proc, NAME, must_contain=b"-z")
 
@@ -209,11 +269,16 @@ class TestRecordsAndModes(OverlapTestCase):
 
     def test_bytes_round_trip(self):
         """SPEC common Records: bytes end to end, non-UTF-8 bytes unchanged, nothing quoted."""
+        # Invalid UTF-8, a quote and a backslash: any decoding or quoting would show here.
         proc = self.ov([], b"r\xff\tM\tcaf\xe9 \"q\\.py\nb\tA\tcaf\xe9 \"q\\.py\n")
         self.assertFound(proc, b"b\tr\xff\tcaf\xe9 \"q\\.py\n")
 
 
 class TestCliContract(OverlapTestCase):
+    """Options, help, version, streams, determinism and read-only behaviour.
+
+    SPEC: "Common rules".
+    """
     def test_dash_h_exits_0(self):
         """SPEC common: -h prints usage and exits 0."""
         proc = self.ov(["-h"], b"")
@@ -241,6 +306,7 @@ class TestCliContract(OverlapTestCase):
     def test_closed_stdout_exits_0_quietly(self):
         """SPEC common: a closed stdout ends the command quietly with exit 0, not exit 1, not a
         traceback."""
+        # Enough output to outlast the pipe buffer, so the write really meets a closed pipe.
         stdin = b"".join(b"%s\tM\tdir/file-%05d.py\n" % (ref, i)
                          for ref in (b"a", b"b") for i in range(20000))
         closed_stdout_run(self, self.sb, NAME, [], stdin, self.cwd)
@@ -250,6 +316,7 @@ class TestCliContract(OverlapTestCase):
         stdin = (b"z\tM\tB\nA\tM\tB\na\tM\tB\nz\tM\t\xc3\xa9\na\tM\t\xc3\xa9\n"
                  b"A\tM\ta\nz\tM\ta\n")
         runs = [self.ov([], stdin, env_extra=e) for e in (
+            # Two identical runs, then a different locale and time zone.
             {"LC_ALL": "C", "TZ": "UTC"}, {"LC_ALL": "C", "TZ": "UTC"},
             {"LC_ALL": "en_US.UTF-8", "LANG": "sv_SE.UTF-8", "TZ": "Pacific/Auckland"})]
         self.assertEqual(runs[0].returncode, 1)
@@ -264,6 +331,7 @@ class TestCliContract(OverlapTestCase):
         a repository)."""
         repo, _ = gherkin_repo(self.sb)
         repo.git("reset", "-q", "--hard", "main")
+        # Refresh the index first, so a stat refresh by git is not mistaken for a change.
         repo.git("update-index", "-q", "--refresh", check=False)
         before = repo.state()
         proc = repo.run(NAME, ["--with", "a"], stdin=b"a\tM\tx.py\nb\tM\tx.py\n")
@@ -276,6 +344,7 @@ class TestCliContract(OverlapTestCase):
         """SPEC overlap Input: footprint records (footprint output) pipe straight in, -z too."""
         repo = Repo(self.sb)
         base = repo.commit(None, {"x.py": "x\n", "w.py": "w\n"}, ref="refs/heads/main")
+        # A path holding TAB checks that -z footprint output survives the pipe intact.
         repo.commit(base, {"x.py": "a\n", b"t\tab": "t\n"}, ref="refs/heads/a")
         repo.commit(base, {"x.py": None, b"t\tab": "u\n"}, ref="refs/heads/b")
         repo.commit(base, {"w.py": "c\n"}, ref="refs/heads/c")
