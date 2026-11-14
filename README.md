@@ -87,6 +87,9 @@ recipe finds such branches. Without `--onto main`, each pair is merged at its ow
 where `agent/f` and `agent/g` conflict because `agent/g` carries the change to `main` that
 `agent/f` conflicts with.
 
+Output read on a terminal shows control bytes in names as `\xHH`; output piped to another program
+is always the raw bytes.
+
 ## Documentation
 
 - [Commands](https://github.com/jacob-adm/git-overlap/blob/main/docs/commands.md): each command's input, output, options and exit status, with

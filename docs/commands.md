@@ -57,8 +57,10 @@ layout, used only in [Using it with other tools](other-tools.md).
 
 Records are one per line, fields separated by one TAB. With `-z`, every command reads and writes
 records ending in NUL instead of LF; use it when a path may contain TAB, LF or CR. In LF mode
-such a name is an error (exit 2) whose message names `-z`; the commands never quote or escape a
-field. Refs are printed exactly as given on input. Paths are relative to the repository root,
+such a name is an error (exit 2) whose message names `-z`; records sent to a pipe or file are
+never quoted or escaped. When stdout is a terminal, LF-mode output is shown for a person instead:
+control bytes and invalid UTF-8 appear as `\xHH` and a backslash as `\\`, so a file name cannot
+recolour or retitle the terminal. Refs are printed exactly as given on input. Paths are relative to the repository root,
 whatever directory the command runs in. The same repository and input give byte-identical
 output, whatever the locale or time zone.
 

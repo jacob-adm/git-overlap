@@ -16,9 +16,14 @@ contract: the implementation and the tests are both written from it, separately.
 - **Input tolerance (LF mode only).** A trailing CR on a record is removed. Empty records are
   skipped. In `-z` mode nothing is removed and empty records are skipped.
 - **Unsafe names.** In LF mode, a ref or path containing TAB, LF or CR cannot be written as a record.
-  The command then writes an error naming `-z` to stderr and exits 2. It never quotes or escapes.
-  In `-z` mode a path may contain TAB or LF; the TAB inside a field is the caller's problem only for
-  refs, which git forbids from containing TAB or LF anyway.
+  The command then writes an error naming `-z` to stderr and exits 2. Records written to a pipe or
+  file are never quoted or escaped. In `-z` mode a path may contain TAB or LF; the TAB inside a
+  field is the caller's problem only for refs, which git forbids from containing TAB or LF anyway.
+- **Terminal output.** In LF mode, when stdout is a terminal, each field is shown for a person:
+  C0 controls, DEL, C1 controls (U+0080 to U+009F) and bytes that are not valid UTF-8 are written
+  as `\xHH`, one per byte, and a backslash as `\\`, so a name cannot move the cursor, recolour or
+  retitle the terminal. Printable UTF-8 is unchanged. Pipes, files and `-z` output (even on a
+  terminal) always carry the raw bytes.
 - **Record errors.** An error about an input record is prefixed `record N: ` (N counted as for
   malformed input); an error about BASE or an option is not.
 - **Malformed input** (too few fields, or an empty ref or path field) is an error: message with
@@ -80,7 +85,7 @@ pull request's "files changed" shows).
 
 ## git overlap [--with REF]
 
-Reports pairs of refs that touch the same path.
+Reports pairs of refs that touch the same path, or a path and a path under it.
 
 - Input: footprint records, `ref TAB status TAB path`. The ref is everything before the first
   TAB, the status (any value; ignored) is between the first and second TAB, and the path is
@@ -91,8 +96,10 @@ Reports pairs of refs that touch the same path.
   sorted by (refA, refB, path). A ref never pairs with itself. Duplicates are written once.
 - `--with REF`: only pairs that include REF (REF may print as refA or refB, per the ordering rule).
   An empty REF is a usage error (exit 2).
-- Known limit, by design: paths are compared exactly. A file `foo` in one ref and `foo/bar` in
-  another are not an overlap here, although `git pairmerge` reports them as a conflict.
+- A path and a path under it are an overlap: a file `foo` in one ref and `foo/bar` in another
+  collide in a merge (file against directory), so the pair is written with the ancestor, `foo`,
+  as its path. Ancestors are found at `/` boundaries only: `foo` and `foobar/x` are not an
+  overlap. Exact and ancestor records share the ordering and duplicate rules above.
 - Known limit, by design: paths and refs are compared bytewise and case-sensitively, as git's
   trees do. `Foo.txt` in one ref and `foo.txt` in another are not an overlap, even though they
   collide on a case-insensitive filesystem.

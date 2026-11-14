@@ -250,12 +250,61 @@ def write_record(fields, zero):
         fields: The fields, as bytes.
         zero: True to end the record with NUL, False with LF.
 
+    In LF mode on a terminal, each field is shown through `for_terminal` instead, so a name
+    cannot drive the terminal; pipes, files and -z always get the raw bytes.
+
     Raises:
         PipeClosed: The reader closed the pipe.
 
-    SPEC: "Records".
+    SPEC: "Records" and "Terminal output".
     """
+    if not zero and _stdout_is_terminal():
+        fields = [for_terminal(field) for field in fields]
     write_stdout(b"\t".join(fields) + (b"\0" if zero else b"\n"))
+
+
+# Asked once per process: whether stdout is a terminal cannot change while the command runs.
+_TERMINAL = []
+
+
+def _stdout_is_terminal():
+    """Return True if stdout is a terminal (a person reading), else False."""
+    if not _TERMINAL:
+        try:
+            _TERMINAL.append(bool(sys.stdout is not None and sys.stdout.isatty()))
+        except (OSError, ValueError):
+            # A closed or odd stdout is not a terminal; the write will report it.
+            _TERMINAL.append(False)
+    return _TERMINAL[0]
+
+
+def for_terminal(field):
+    """Return FIELD with every byte a terminal could obey shown as a backslash escape.
+
+    Printable UTF-8 text passes through. C0 controls, DEL, C1 controls (U+0080-U+009F) and
+    bytes that are not valid UTF-8 become \\xHH, one per byte; a backslash is doubled so an
+    escape on screen is never ambiguous.
+
+    Args:
+        field: A ref or path, as bytes.
+
+    Returns:
+        The display form, as bytes.
+    """
+    out = []
+    # surrogateescape maps each invalid byte to one lone surrogate, U+DC80-U+DCFF.
+    for char in field.decode("utf-8", "surrogateescape"):
+        code = ord(char)
+        if char == "\\":
+            out.append("\\\\")
+        elif 0xDC80 <= code <= 0xDCFF:
+            out.append("\\x%02x" % (code - 0xDC00))
+        elif code < 0x20 or 0x7F <= code <= 0x9F:
+            # One escape per encoded byte, so the original bytes can be read back off screen.
+            out.extend("\\x%02x" % byte for byte in char.encode("utf-8"))
+        else:
+            out.append(char)
+    return "".join(out).encode("utf-8")
 
 
 def git(args, extra_env=None, data=None, cwd=None):
