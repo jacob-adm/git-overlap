@@ -16,9 +16,14 @@ contract: the implementation and the tests are both written from it, separately.
 - **Input tolerance (LF mode only).** A trailing CR on a record is removed. Empty records are
   skipped. In `-z` mode nothing is removed and empty records are skipped.
 - **Unsafe names.** In LF mode, a ref or path containing TAB, LF or CR cannot be written as a record.
-  The command then writes an error naming `-z` to stderr and exits 2. It never quotes or escapes.
-  In `-z` mode a path may contain TAB or LF; the TAB inside a field is the caller's problem only for
-  refs, which git forbids from containing TAB or LF anyway.
+  The command then writes an error naming `-z` to stderr and exits 2. Records written to a pipe or
+  file are never quoted or escaped. In `-z` mode a path may contain TAB or LF; the TAB inside a
+  field is the caller's problem only for refs, which git forbids from containing TAB or LF anyway.
+- **Terminal output.** In LF mode, when stdout is a terminal, each field is shown for a person:
+  C0 controls, DEL, C1 controls (U+0080 to U+009F) and bytes that are not valid UTF-8 are written
+  as `\xHH`, one per byte, and a backslash as `\\`, so a name cannot move the cursor, recolour or
+  retitle the terminal. Printable UTF-8 is unchanged. Pipes, files and `-z` output (even on a
+  terminal) always carry the raw bytes.
 - **Record errors.** An error about an input record is prefixed `record N: ` (N counted as for
   malformed input); an error about BASE or an option is not.
 - **Malformed input** (too few fields, or an empty ref or path field) is an error: message with

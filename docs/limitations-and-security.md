@@ -38,3 +38,6 @@
   does before merging branches that are not trusted.
 - The commands start git without a shell. A ref or path quoted in an error message is escaped,
   so the message stays one line.
+- On a terminal, control bytes in a ref or path are shown as `\xHH`, so a file name from an
+  untrusted branch cannot drive the terminal. Records in a pipe, a file or `-z` output are raw;
+  escape them yourself before showing them anywhere a terminal will interpret them.
