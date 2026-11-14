@@ -2,8 +2,8 @@
 """HNET-216: every ```sh block under "## Recipes" in README.md is executed and its stdout checked.
 
 The fixture repository reproduces the night described by Xuchen Yao, "Rethinking Merging and
-Continuous Integration for Agentic Workflows" (2026): five agent branches off `main`, most of which
-add to the same shared files, one file of each typed-path kind:
+Continous Integration for Agentic Workflows" (4 November 2026): five agent branches off `main`,
+most of which add to the same shared files, one file of each typed-path kind:
 
   tools/registry.py   set       a Python list, one entry per line (with trailing comma)
   CHANGELOG.md        log       each branch adds a line under "## Unreleased"
@@ -57,7 +57,7 @@ def lines(*records):
     return "".join(T.join(fields) + "\n" for fields in records)
 
 
-# --- Expected output of every recipe, keyed by its "### " heading in README.md. ------------------
+# --- Expected output of every recipe, keyed by the NAME of its "### NAME: question?" heading. ---
 # A recipe in the README without an entry here (or an entry without a recipe) fails
 # test_every_recipe_is_checked, so no documented command can go unchecked.
 
@@ -133,27 +133,34 @@ EXPECTED = {
 
 
 def readme_recipes():
-    """Return [(heading, sh source)] for every ```sh block in README.md's "## Recipes" section.
+    """List the ```sh blocks of README.md's "## Recipes" section with their headings.
 
     The section runs from "## Recipes" to the next "## " heading. Each block is attributed to the
-    nearest "### " heading above it; a block before any "### " heading gets heading None, which
-    test_every_recipe_is_checked rejects.
+    nearest "### NAME: QUESTION" heading above it. test_every_recipe_is_checked rejects a block
+    without a heading and a heading without a question.
+
+    SPEC: "Recipes"
+
+    Returns:
+        [(name, question, sh source)]: name is None for a block before any "### " heading;
+        question is None if the heading has no ": ".
     """
     with open(README, "r", encoding="utf-8") as handle:
         text = handle.read()
     match = re.search(r"^## Recipes\n(.*?)(?=^## |\Z)", text, re.M | re.S)
     if not match:
         return []
-    recipes, heading, block = [], None, None
+    recipes, name, question, block = [], None, None, None
     for line in match.group(1).split("\n"):
         if block is not None:                 # inside a fence: collect until the closing ```
             if line.startswith("```"):
-                recipes.append((heading, "\n".join(block) + "\n"))
+                recipes.append((name, question, "\n".join(block) + "\n"))
                 block = None
             else:
                 block.append(line)
         elif line.startswith("### "):
-            heading = line[4:].strip()
+            name, _, question = line[4:].strip().partition(": ")
+            question = question or None
         elif line.startswith("```sh"):
             block = []
     return recipes
@@ -187,14 +194,17 @@ def build_fixture(sandbox):
     }, ref="refs/heads/main")
 
     def add_tool(name):
+        """Return the registry with tool NAME added after "search"."""
         # Set: one entry per line with a trailing comma, so a union merge stays valid Python.
         return registry.replace('"search",\n', '"search",\n    "%s",\n' % name)
 
     def add_log(entry):
+        """Return the changelog with ENTRY as the first line under "## Unreleased"."""
         # Log: every branch writes its line straight under "## Unreleased" (same spot).
         return changelog.replace("## Unreleased\n", "## Unreleased\n- %s\n" % entry)
 
     def add_path(path):
+        """Return openapi.json as the generator writes it with PATH added."""
         # Derived: the generator rewrites the "/search" line (adds a comma) and appends a path.
         return openapi.replace('"/search"\n', '"/search",\n    "%s"\n' % path)
 
@@ -227,10 +237,11 @@ class RecipesTest(unittest.TestCase):
         cls.bin = cls.sb.mkdir("bin")
         for name in ("footprint", "overlap", "pairmerge"):
             write_wrapper(cls.bin, name, name)
-        cls.recipes = dict((heading, source) for heading, source in readme_recipes())
+        cls.recipes = dict((name, source) for name, _, source in readme_recipes())
 
     @classmethod
     def tearDownClass(cls):
+        """Remove the sandbox and everything in it."""
         cls.sb.cleanup()
 
     def run_recipe(self, heading):
@@ -259,8 +270,12 @@ class RecipesTest(unittest.TestCase):
         """Acceptance: "no documented command can drift from the code". Every ```sh block under
         Recipes sits under its own ### heading and has an expected output here, and vice versa."""
         found = readme_recipes()
-        headings = [heading for heading, _ in found]
+        headings = [name for name, _, _ in found]
         self.assertNotIn(None, headings, "a ```sh block in Recipes has no ### heading")
+        for name, question, _ in found:
+            # The owner's rule: each recipe heading says which question it answers.
+            self.assertTrue(question and question.endswith("?"),
+                            "heading '### %s' must read '### NAME: question?'" % name)
         self.assertEqual(len(headings), len(set(headings)), "one ```sh block per ### heading")
         self.assertEqual(sorted(headings), sorted(EXPECTED))
 
