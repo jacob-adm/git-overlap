@@ -185,15 +185,35 @@ def repository_layout():
     if code != 0:
         raise Fail("not a git repository: %s" % git_error(err, code))
     # abspath: git may print a path relative to our cwd, but merge-tree runs elsewhere.
-    objects = os.path.abspath(os.fsdecode(out.rstrip(b"\r\n")))
+    objects = os.path.abspath(os.fsdecode(path_line(out)))
     code, out, _ = git(["rev-parse", "--show-toplevel"])
-    root = out.rstrip(b"\r\n")
+    root = path_line(out)
     if code != 0 or not root:
         code, out, err = git(["rev-parse", "--absolute-git-dir"])
         if code != 0:
             raise Fail("cannot find the repository root: %s" % git_error(err, code))
-        root = out.rstrip(b"\r\n")
+        root = path_line(out)
     return objects, os.fsdecode(root)
+
+
+def path_line(out):
+    """Return a path git printed on one line, without the line end git added.
+
+    Only that one LF is removed: a directory name may itself end in CR or LF on POSIX. On
+    Windows, where no path can hold CR, one CR before it is removed too.
+
+    Args:
+        out: git's stdout, as bytes.
+
+    Returns:
+        The path, as bytes.
+    """
+    if out.endswith(b"\n"):
+        out = out[:-1]
+    # CR is legal in POSIX names but impossible in Windows ones, so only strip it there.
+    if os.name == "nt" and out.endswith(b"\r"):
+        out = out[:-1]
+    return out
 
 
 def private_object_env(tempdir, objects):

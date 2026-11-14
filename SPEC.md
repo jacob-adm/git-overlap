@@ -85,7 +85,7 @@ pull request's "files changed" shows).
 
 ## git overlap [--with REF]
 
-Reports pairs of refs that touch the same path.
+Reports pairs of refs that touch the same path, or a path and a path under it.
 
 - Input: footprint records, `ref TAB status TAB path`. The ref is everything before the first
   TAB, the status (any value; ignored) is between the first and second TAB, and the path is
@@ -96,8 +96,10 @@ Reports pairs of refs that touch the same path.
   sorted by (refA, refB, path). A ref never pairs with itself. Duplicates are written once.
 - `--with REF`: only pairs that include REF (REF may print as refA or refB, per the ordering rule).
   An empty REF is a usage error (exit 2).
-- Known limit, by design: paths are compared exactly. A file `foo` in one ref and `foo/bar` in
-  another are not an overlap here, although `git pairmerge` reports them as a conflict.
+- A path and a path under it are an overlap: a file `foo` in one ref and `foo/bar` in another
+  collide in a merge (file against directory), so the pair is written with the ancestor, `foo`,
+  as its path. Ancestors are found at `/` boundaries only: `foo` and `foobar/x` are not an
+  overlap. Exact and ancestor records share the ordering and duplicate rules above.
 - Known limit, by design: paths and refs are compared bytewise and case-sensitively, as git's
   trees do. `Foo.txt` in one ref and `foo.txt` in another are not an overlap, even though they
   collide on a case-insensitive filesystem.
