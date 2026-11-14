@@ -2,6 +2,7 @@
 """Implementer's tests for git footprint, run against real temporary git repositories."""
 
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -10,6 +11,10 @@ import unittest
 
 # The project root, put on PYTHONPATH so `python -m git_overlap.footprint` finds the package.
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+# The package version, read from its source so the --version tests need no edit per release.
+with open(os.path.join(ROOT, "git_overlap", "__init__.py"), encoding="utf-8") as _init:
+    VERSION = re.search(r'__version__ = "([^"]+)"', _init.read()).group(1)
 
 
 def git(repo, *args):
@@ -263,7 +268,7 @@ class FootprintTest(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertIn(b"-z", out)
         code, out, _ = tool("footprint", self.repo, ["--version"], b"")
-        self.assertEqual((code, out), (0, b"git-footprint 0.1.0\n"))
+        self.assertEqual((code, out), (0, ("git-footprint %s\n" % VERSION).encode()))
 
 
 if __name__ == "__main__":
