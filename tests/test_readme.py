@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """HNET-228: every ```sh example in README.md outside "## Recipes" runs, and its output is exact.
 
-SPEC: "Recipes"
+SPEC: "Recipes (HNET-216)".
 
 The README's fence rules, enforced by test_fences:
 
@@ -189,7 +189,7 @@ class ReadmeExamplesTest(unittest.TestCase):
     def test_examples(self):
         """Run every example with `sh -c` in the fixture; pairmerge ones need git >= 2.43.
 
-        SPEC: "Recipes"
+        SPEC: "Recipes (HNET-216)".
         """
         # The sandbox environment, with the git-<name> wrappers found first on PATH.
         env = dict(self.sb.env)
