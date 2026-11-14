@@ -143,7 +143,8 @@ main: `printf 'main\tfeature\n' | git pairmerge`.
   configuration cannot turn a clean pair into a conflict or back.
 - Still honoured, because git gives them precedence or because they are the point:
   `$GIT_DIR/info/attributes`, `core.attributesFile`, and merge drivers defined in git config (which
-  is how a syntax-aware driver such as Mergiraf can be evaluated). The README states this.
+  is how a syntax-aware driver such as Mergiraf can be evaluated).
+  [docs/commands.md](docs/commands.md) states this.
 - merge-tree runs at the repository root (or the git directory of a bare repository), so the
   paths it prints are root-relative.
 - **Nothing is written to the repository.** Every git call of `git pairmerge` that can write
@@ -165,5 +166,6 @@ main: `printf 'main\tfeature\n' | git pairmerge`.
 
 ## Recipes
 
-The README recipes are part of the contract: the test suite runs every one of them against a
-fixture repository and checks the output.
+The recipes in [docs/recipes.md](docs/recipes.md) are part of the contract, as are the examples
+in README.md and docs/: the test suite runs every one of them against a fixture repository and
+checks the output.
