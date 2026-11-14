@@ -4,7 +4,7 @@
 Reads records whose first two fields are refs and writes `refA TAB refB TAB clean TAB` or one
 `refA TAB refB TAB conflict TAB path` per conflicted path. Merges run in memory with
 `git merge-tree --write-tree`; every object git writes lands in a private temporary object
-directory, so the repository is never changed. Contract: SPEC.md, "Merge mechanism".
+directory, so the repository is never changed. SPEC: "git pairmerge" and "Merge mechanism".
 """
 
 import os
@@ -56,10 +56,16 @@ def check_git_version():
 
     Accepts forms such as "git version 2.50.1 (Apple Git-155)" and
     "git version 2.43.0.windows.1": only the first two numbers after "git version" count.
+
+    Raises:
+        Fail: git version fails, prints no version, or is older than GIT_FLOOR.
+
+    SPEC: "Merge mechanism" (version floor for git pairmerge).
     """
     code, out, err = git(["version"])
     if code != 0:
         raise Fail("cannot run git version: %s" % git_error(err, code))
+    # search, not match: text before the version number is tolerated.
     match = re.search(rb"git version (\d+)\.(\d+)", out)
     if not match:
         raise Fail("cannot read the git version from %r; git pairmerge needs git %d.%d or later"
@@ -71,9 +77,22 @@ def check_git_version():
 
 
 def read_pairs(zero):
-    """Return [(record number, refA, refB)] from stdin: first two fields, the rest ignored."""
+    """Read the pairs from stdin: the first two fields of each record, the rest ignored.
+
+    Args:
+        zero: True for -z mode, False for LF mode.
+
+    Returns:
+        A list of (record number, refA, refB) tuples, refs as bytes, in input order.
+
+    Raises:
+        Fail: A record is malformed or, in LF mode, a ref holds CR.
+
+    SPEC: "git pairmerge" (Input) and "Malformed input".
+    """
     pairs = []
     for number, record in read_records(zero):
+        # Split on every TAB: fields after the second are ignored, so overlap output pipes in.
         fields = record.split(b"\t")
         # Fewer than 2 fields, or an empty ref, is malformed input.
         if len(fields) < 2 or fields[0] == b"" or fields[1] == b"":
@@ -95,7 +114,12 @@ _PATH_VARIABLES = ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR
 
 
 def absolutise_git_paths():
-    """Make relative GIT_DIR-style variables absolute, relative to our (the caller's) cwd."""
+    """Make relative GIT_DIR-style variables absolute, relative to our (the caller's) cwd.
+
+    Changes os.environ in place, so every later git call inherits the absolute paths.
+
+    SPEC: "Merge mechanism" (merge-tree runs at the repository root).
+    """
     for name in _PATH_VARIABLES:
         value = os.environ.get(name)
         if value and not os.path.isabs(value):
@@ -108,6 +132,14 @@ def c_quote(path):
     git splits that variable on the path separator, but an entry starting with '"' is first
     unquoted C-style (object-file.c, parse_alt_odb_entry), so a quoted entry may hold the
     separator. Backslash and '"' get a backslash; control characters become octal escapes.
+
+    Args:
+        path: The directory, as str.
+
+    Returns:
+        The quoted entry, including its surrounding double quotes.
+
+    SPEC: "Merge mechanism" (GIT_ALTERNATE_OBJECT_DIRECTORIES quoting).
     """
     out = []
     for char in path:
@@ -127,10 +159,19 @@ def repository_layout():
     GIT_OBJECT_DIRECTORY). The root is the top of the worktree, or the git directory when
     there is no worktree (a bare repository, or running inside .git), so that merge-tree,
     run there, prints root-relative paths.
+
+    Returns:
+        A tuple (objects directory, root directory), both absolute str.
+
+    Raises:
+        Fail: Not inside a git repository, or the root cannot be found.
+
+    SPEC: "Merge mechanism" and "Paths are relative to the repository root".
     """
     code, out, err = git(["rev-parse", "--git-path", "objects"])
     if code != 0:
         raise Fail("not a git repository: %s" % git_error(err, code))
+    # abspath: git may print a path relative to our cwd, but merge-tree runs elsewhere.
     objects = os.path.abspath(os.fsdecode(out.rstrip(b"\r\n")))
     code, out, _ = git(["rev-parse", "--show-toplevel"])
     root = out.rstrip(b"\r\n")
@@ -147,8 +188,18 @@ def private_object_env(tempdir, objects):
 
     `objects` is C-quoted when it holds the path separator or starts with '"'. An alternates
     list the caller already set is kept after it.
+
+    Args:
+        tempdir: The private temporary object directory.
+        objects: The repository's absolute object directory.
+
+    Returns:
+        A dict of the two environment variables to pass to git.
+
+    SPEC: "Merge mechanism" (nothing is written to the repository).
     """
     entry = objects
+    # Quote only when needed (SPEC): a plain entry is read verbatim.
     if os.pathsep in entry or entry.startswith('"'):
         entry = c_quote(entry)
     existing = os.environ.get("GIT_ALTERNATE_OBJECT_DIRECTORIES")
@@ -163,7 +214,16 @@ def check_object_access(env):
     Probes one object a ref points at (read without the override) through the private
     environment, so a broken alternates entry is never reported as an unknown ref. A
     repository with no refs has nothing to probe.
+
+    Args:
+        env: The private object environment from private_object_env.
+
+    Raises:
+        Fail: The probe object cannot be read through `env`.
+
+    SPEC: "Merge mechanism" (a set-up failure is never reported as an unknown ref).
     """
+    # Ask without `env`, so the probe id comes from the repository as the caller sees it.
     code, out, _ = git(["for-each-ref", "--count=1", "--format=%(objectname)"])
     oid = out.strip()
     if code != 0 or not OID.match(oid):
@@ -179,10 +239,24 @@ def attribute_tree(attributes, env):
 
     Without FILE it is the empty tree (written explicitly: it need not exist as an object).
     With FILE it is a tree holding FILE's bytes as its root .gitattributes.
+
+    Args:
+        attributes: FILE's bytes, or None without --attributes.
+        env: The private object environment.
+
+    Returns:
+        The tree id (bytes).
+
+    Raises:
+        Fail: git cannot write the blob or the tree.
+
+    SPEC: "Merge mechanism" (the attribute source is always pinned).
     """
     if attributes is None:
+        # The empty tree is hashed from empty input, so it is the same id in any repository.
         code, out, err = git(["hash-object", "-w", "-t", "tree", "--stdin"], env, b"")
     else:
+        # --no-filters: FILE is stored as its exact bytes, untouched by clean filters or EOL.
         code, out, err = git(["hash-object", "-w", "--no-filters", "--stdin"], env, attributes)
         if code == 0:
             # mktree -z reads one NUL-terminated "mode type oid TAB name" entry.
@@ -198,6 +272,18 @@ def check_merge_base(sha_a, sha_b, env, ref_a, ref_b):
 
     `git merge-base` exits 1 with no output when there is no common ancestor; checking first
     means git's own refusal message from merge-tree is never parsed.
+
+    Args:
+        sha_a: The first commit id (bytes).
+        sha_b: The second commit id (bytes).
+        env: The private object environment.
+        ref_a: The first ref as written, for messages.
+        ref_b: The second ref as written, for messages.
+
+    Raises:
+        Fail: No merge base (naming both refs), or git merge-base fails.
+
+    SPEC: "Shallow or unrelated histories".
     """
     code, out, err = git(["merge-base", sha_a, sha_b], env)
     if code == 1 and not out.strip():
@@ -212,6 +298,23 @@ def merge(tree, sha_a, sha_b, env, root, ref_a, ref_b):
 
     Clean/conflict is decided by the exit code and the tree id, never by git's messages. A
     conflict with no listed paths returns [b""], written as one record with an empty path.
+
+    Args:
+        tree: The attribute-source tree id (bytes).
+        sha_a: The first commit id (bytes).
+        sha_b: The second commit id (bytes).
+        env: The private object environment.
+        root: The repository root, where merge-tree runs.
+        ref_a: The first ref as written, for messages.
+        ref_b: The second ref as written, for messages.
+
+    Returns:
+        None if the pair merges cleanly, else a sorted list of conflicted paths (bytes).
+
+    Raises:
+        Fail: merge-tree exits with anything but a clean result or a conflict.
+
+    SPEC: "Merge mechanism" (Per pair).
     """
     # Run at the repository root, so the paths merge-tree prints are root-relative.
     code, out, err = git(list(PINNED_CONFIG) +
@@ -223,6 +326,7 @@ def merge(tree, sha_a, sha_b, env, root, ref_a, ref_b):
     # Output is "TREE NUL PATH NUL PATH NUL ..."; a conflict needs a real tree id first.
     fields = out.split(b"\0")
     if code == 1 and OID.match(fields[0]):
+        # set(): never write one path twice, whatever git lists; sorted() is bytewise.
         paths = sorted(set(path for path in fields[1:] if path != b""))
         return paths or [b""]
     raise Fail("git merge-tree failed for %s and %s: %s"
@@ -233,6 +337,11 @@ def remove_tree(path):
     """Delete `path` recursively, making read-only files writable first (Windows needs it).
 
     If anything is left, warn on stderr naming the directory; the exit status is unchanged.
+
+    Args:
+        path: The directory to remove.
+
+    SPEC: "Merge mechanism" (the temporary directory is removed).
     """
     for root, dirs, files in os.walk(path):
         for name in dirs + files:
@@ -240,6 +349,7 @@ def remove_tree(path):
                 os.chmod(os.path.join(root, name), stat.S_IWRITE | stat.S_IREAD | stat.S_IEXEC)
             except OSError:
                 pass
+    # ignore_errors: what cannot be removed is reported below, not raised mid-cleanup.
     shutil.rmtree(path, ignore_errors=True)
     if os.path.exists(path):
         # Not fatal (the result stands), but the caller should know what was left behind.
@@ -248,7 +358,21 @@ def remove_tree(path):
 
 
 def pairmerge(argv):
-    """Run the command on argv (without the program name); return the exit code."""
+    """Run git pairmerge.
+
+    Args:
+        argv: The arguments, without the program name.
+
+    Returns:
+        EXIT_FOUND if any pair conflicts, else EXIT_NOTHING.
+
+    Raises:
+        Fail: A usage error, git too old, an unreadable FILE, a malformed record, an unknown
+            ref, no merge base, or a merge-tree failure.
+        Interrupted: SIGINT, SIGTERM or SIGHUP arrived (after the cleanup ran).
+
+    SPEC: "git pairmerge" and "Merge mechanism".
+    """
     opts, positionals = parse_args(argv, ("-z", "-h", "--version"), ("--attributes",))
     if usage_and_version(opts, NAME, USAGE):
         return EXIT_NOTHING
@@ -317,7 +441,13 @@ def pairmerge(argv):
 
 
 def main():
-    """Console-script entry point: run on sys.argv and exit with the SPEC's status."""
+    """Console-script entry point: run on sys.argv and exit with the SPEC's status.
+
+    Raises:
+        SystemExit: Always (0, 1, 2, or 128 + signal number).
+
+    SPEC: "Common rules" (console scripts) and "Exit status".
+    """
     run(NAME, lambda: pairmerge(sys.argv[1:]))
 
 
