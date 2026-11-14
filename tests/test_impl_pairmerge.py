@@ -310,8 +310,6 @@ class PairmergeTest(unittest.TestCase):
 
 
 @unittest.skipUnless(HAS_FLOOR, "git pairmerge needs git 2.43 or later")
-@unittest.skipIf(os.name == "nt", "signals and blocked pipes are tested on POSIX only")
-@unittest.skipUnless(HAS_FLOOR, "git pairmerge needs git 2.43 or later")
 class StreamingTest(unittest.TestCase):
     """Many clean pairs whose records together fit in one stdout buffer: without a flush per
     pair, nothing would reach the reader until the run ended.
@@ -367,6 +365,8 @@ class StreamingTest(unittest.TestCase):
         self.assertLess(first_at, end_at / 2, "first record %.2fs, run %.2fs" % (first_at, end_at))
 
 
+@unittest.skipUnless(HAS_FLOOR, "git pairmerge needs git 2.43 or later")
+@unittest.skipIf(os.name == "nt", "signals and blocked pipes are tested on POSIX only")
 class BlockedWriterTest(unittest.TestCase):
     """A pair conflicting in many long paths: its output overfills the pipe, so git pairmerge
     blocks writing while its private object directory exists.
