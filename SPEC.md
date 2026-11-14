@@ -30,7 +30,8 @@ contract: the implementation and the tests are both written from it, separately.
   On exit 2 no partial result is guaranteed; stdout may hold records written before the error.
 - **Errors** go to stderr as one line: `git-<name>: <message>`. Never a traceback. A ref or path
   quoted in a message is escaped (backslash escapes for TAB, LF, CR, backslash and any byte that is
-  not printable ASCII), so the message stays one line whatever the name holds.
+  not printable ASCII), so the message stays one line whatever the name holds. The line ends in LF
+  on every platform (no CR LF on Windows).
 - **Unterminated last record.** A final record without its LF or NUL is accepted.
 - **Standard streams.** `-h` and `--version` print to stdout and exit 0, taking precedence over
   any other argument. If file descriptor 0 or 1 is not open at all (`<&-`, `>&-`), the command
@@ -47,6 +48,9 @@ contract: the implementation and the tests are both written from it, separately.
   revisions), and `git rev-parse --verify OID^{commit}` must then succeed. Otherwise: exit 2,
   `unknown ref or not a commit: <ref>`, before any merge or diff runs. BASE is resolved before
   stdin is read. "Repeated" means the same spelling, not the same commit.
+  On Windows a program's arguments are Unicode, so a ref that is not valid UTF-8 cannot be
+  passed to git at all: there it is exit 2 with `cannot pass a name that is not valid UTF-8 to
+  git on this platform: <ref>` (escaped as above) instead of `unknown ref or not a commit`.
 - **Refs** may be any commit-ish (`main`, `origin/x`, a SHA, `HEAD~2`, `:/message`). A ref starting with `-` must
   be treated as a ref, never as an option. A ref is printed exactly as the caller wrote it.
 - `-h` prints usage and exits 0. (`git footprint --help` is intercepted by git itself; document `-h`.)

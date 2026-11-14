@@ -136,13 +136,16 @@ class TestErrorEscaping(RevisedTestCase):
             self.assertExactError(proc, unknown("footprint", shown, 1))
 
     def test_non_printable_bytes_escaped(self):
-        """SPEC Errors: any byte that is not printable ASCII is escaped; one printable line."""
+        """SPEC Errors: any byte that is not printable ASCII is escaped; one printable line.
+        SPEC Resolving a ref: on Windows a non-UTF-8 ref cannot be passed to git, and says so."""
         repo, _ = gherkin_repo(self.sb)
         proc = repo.run("footprint", ["-z", "main"], stdin=b"\xff\x01\x1bz\xc3\xa9\0")
         self.assertEqual(proc.returncode, 2)
         self.assertRegex(proc.stderr, PRINTABLE_LINE)
-        self.assertTrue(proc.stderr.startswith(
-            b"git-footprint: record 1: unknown ref or not a commit: "), proc.stderr)
+        message = (b"cannot pass a name that is not valid UTF-8 to git on this platform: "
+                   if os.name == "nt" else b"unknown ref or not a commit: ")
+        self.assertEqual(proc.stderr, b"git-footprint: record 1: " + message
+                         + b"\\xff\\x01\\x1bz\\xc3\\xa9\n")
 
     @needs_pairmerge_git
     def test_pairmerge_escapes_names(self):

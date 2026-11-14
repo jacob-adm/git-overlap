@@ -112,6 +112,9 @@ class Repo(object):
                               stderr=subprocess.PIPE, cwd=self.path, env=env, timeout=120)
         if kw.get("check", True) and proc.returncode != 0:
             raise RuntimeError("git %r failed: %r" % (args, proc.stderr))
+        if kw.get("quiet") and proc.stderr:
+            # e.g. update-index "Ignoring path": a fixture that silently lost a path is a bug.
+            raise RuntimeError("git %r warned: %r" % (args, proc.stderr))
         return proc.stdout
 
     def blob(self, content):
@@ -131,10 +134,15 @@ class Repo(object):
         if os.path.exists(index):
             os.remove(index)
         extra = {"GIT_INDEX_FILE": index}
+        # Git for Windows' core.protectNTFS (on by default) refuses, in any index, paths that
+        # NTFS cannot hold (TAB, LF, CR, '"', backslash, ...); update-index then drops them with
+        # "Ignoring path" and exit 0. These commits never touch a worktree, so build the trees
+        # every platform can hold; the commands under test still run with git's defaults.
+        ntfs = ("-c", "core.protectNTFS=false")
         if parent:
-            self.git("read-tree", parent, env_extra=extra)
+            self.git(*ntfs + ("read-tree", parent), env_extra=extra)
         else:
-            self.git("read-tree", "--empty", env_extra=extra)
+            self.git(*ntfs + ("read-tree", "--empty"), env_extra=extra)
         info = []
         for path, value in changes.items():
             path = _b(path)
@@ -146,16 +154,29 @@ class Repo(object):
                 info.append(b"120000 " + self.blob(value[1]) + b"\t" + path + b"\0")
             else:
                 info.append(b"100644 " + self.blob(value) + b"\t" + path + b"\0")
-        self.git("update-index", "-z", "--index-info", input=b"".join(info), env_extra=extra)
-        tree = self.git("write-tree", env_extra=extra).strip().decode()
+        self.git(*ntfs + ("update-index", "-z", "--index-info"), input=b"".join(info),
+                 env_extra=extra, quiet=True)
+        tree = self.git(*ntfs + ("write-tree",), env_extra=extra).strip().decode()
         cmd = ["commit-tree", tree, "-m", message]
         if parent:
             cmd += ["-p", parent]
         sha = self.git(*cmd).strip().decode()
         os.remove(index)
         if ref:
-            self.git("update-ref", ref, sha)
+            self.set_ref(ref, sha)
         return sha
+
+    def set_ref(self, ref, sha):
+        """Point REF at SHA. On Windows a ref holding a character NTFS forbids in a file name
+        (e.g. '|') cannot be a loose ref file, so it goes into packed-refs, where git reads it
+        on every platform."""
+        if os.name == "nt" and re.search(r'[\x00-\x1f"*:<>?|]', ref):
+            packed = os.path.join(self.path, ".git", "packed-refs")
+            # No "sorted" header: git sorts an unheaded packed-refs file when it reads it.
+            with open(packed, "ab") as fh:
+                fh.write(_b(sha) + b" " + _b(ref) + b"\n")
+        else:
+            self.git("update-ref", ref, sha)
 
     def rev(self, spec):
         return self.git("rev-parse", "--verify", "--end-of-options", spec).strip().decode()

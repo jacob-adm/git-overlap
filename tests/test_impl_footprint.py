@@ -155,11 +155,14 @@ class FootprintTest(unittest.TestCase):
         self.assertTrue(out.startswith(b":/^feat\tD\ta.txt\n"))
 
     def test_error_names_are_escaped_to_one_line(self):
-        """A ref holding LF or a non-UTF-8 byte is escaped in the one-line error message."""
+        """A ref holding LF or a non-UTF-8 byte is escaped in the one-line error message
+        (on Windows such a ref cannot reach git's argv, and the message says so)."""
         code, _, err = tool("footprint", self.repo, ["-z", "main"], b"no\nsuch\\\xff\0")
         self.assertEqual(code, 2)
-        self.assertEqual(err, b"git-footprint: record 1: unknown ref or not a commit: "
-                              b"no\\nsuch\\\\\\xff\n")
+        message = (b"cannot pass a name that is not valid UTF-8 to git on this platform: "
+                   if os.name == "nt" else b"unknown ref or not a commit: ")
+        self.assertEqual(err, b"git-footprint: record 1: " + message
+                              + b"no\\nsuch\\\\\\xff\n")
 
     def test_unterminated_last_record(self):
         """A final record without its LF is accepted."""

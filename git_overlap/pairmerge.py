@@ -16,7 +16,8 @@ import tempfile
 
 from ._common import (EXIT_FOUND, EXIT_NOTHING, OID, Fail, check_safe, git, git_error,
                       ignore_signals, install_signal_handlers, parse_args, read_records,
-                      resolve, run, show, usage_and_version, write_record)
+                      resolve, run, show, usage_and_version, write_record,
+                      write_stderr_line)
 
 NAME = "pairmerge"
 USAGE = """usage: git pairmerge [-z] [--attributes FILE] < pairs
@@ -242,9 +243,8 @@ def remove_tree(path):
     shutil.rmtree(path, ignore_errors=True)
     if os.path.exists(path):
         # Not fatal (the result stands), but the caller should know what was left behind.
-        if sys.stderr is not None:
-            sys.stderr.write("git-%s: warning: could not remove temporary directory %s\n"
-                             % (NAME, show(path)))
+        write_stderr_line("git-%s: warning: could not remove temporary directory %s"
+                          % (NAME, show(path)))
 
 
 def pairmerge(argv):
