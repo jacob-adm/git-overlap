@@ -9,6 +9,7 @@ the comment density, not its wording, which is left to review.
 import ast
 import io
 import os
+import re
 import tokenize
 import unittest
 
@@ -37,6 +38,35 @@ def python_files():
         for name in os.listdir(os.path.join(ROOT, folder)):
             if name.endswith(".py"):
                 found.append(os.path.join(folder, name))
+    return sorted(found)
+
+
+# Ticket keys and pull request numbers belong in commit messages and PR descriptions, never in
+# the shipped files. A key is two or more capitals, a hyphen and digits; standard
+# names of the same shape (SHA-256, UTF-8, ISO-8601, RFC-3339) are not tickets.
+_TRACKER_REF = re.compile(
+    r"\b(?!(?:SHA|UTF|ISO|RFC)-)[A-Z][A-Z]+-[0-9]+\b"   # issue-tracker key
+    r"|\bPR ?#[0-9]+"                                     # "PR", optional space, "#", digits
+    r"|/pull/[0-9]+")                                      # a pull request URL
+
+
+def shipped_text_files():
+    """List the text files that ship in the repository: docs, code, tests and configuration.
+
+    Returns:
+        Sorted paths relative to ROOT: README.md, SPEC.md, pyproject.toml, every file under
+        git_overlap/, tests/ and .github/ (compiled caches excluded). LICENSE is excluded: it is
+        the unmodified Apache text.
+    """
+    found = [name for name in ("README.md", "SPEC.md", "pyproject.toml")
+             if os.path.exists(os.path.join(ROOT, name))]
+    for folder in ("git_overlap", "tests", ".github"):
+        for parent, dirs, names in os.walk(os.path.join(ROOT, folder)):
+            # Bytecode caches are build output, not shipped text.
+            dirs[:] = [d for d in dirs if d != "__pycache__"]
+            for name in names:
+                if not name.endswith(".pyc"):
+                    found.append(os.path.relpath(os.path.join(parent, name), ROOT))
     return sorted(found)
 
 
@@ -146,6 +176,29 @@ class TestDocumentation(unittest.TestCase):
                   '     2)\n')
         # Code: "x = 1" and both lines of the tuple; comments: the inline one and the own-line one.
         self.assertEqual(count_lines(source), (2, 3))
+
+    def test_no_ticket_or_pull_request_references_in_shipped_files(self):
+        """Fail if any shipped file names an issue-tracker ticket or a pull request.
+
+        Owner's rule: ticket keys and PR numbers live in commit messages and PR descriptions,
+        never in docs, code or tests, which outlive the tracker.
+        """
+        found = []
+        for relpath in shipped_text_files():
+            with open(os.path.join(ROOT, relpath), encoding="utf-8", errors="replace") as handle:
+                for number, line in enumerate(handle, 1):
+                    # Report every hit with its location, so one run shows them all.
+                    for match in _TRACKER_REF.finditer(line):
+                        found.append("%s:%d: %s" % (relpath, number, match.group(0)))
+        self.assertEqual(found, [], "ticket or PR references in shipped files")
+
+    def test_the_reference_pattern_is_not_fooled(self):
+        """The pattern catches real references and ignores standard names of the same shape."""
+        # Built from pieces so this file does not itself contain a reference.
+        for text in ("see ABC" + "-12", "PR " + "#4", "PR" + "#4", "github.com/o/r/pull" + "/7"):
+            self.assertTrue(_TRACKER_REF.search(text), text)
+        for text in ("SHA-256", "UTF-8", "ISO-8601", "RFC-3339", "git-overlap", "Python 3.8"):
+            self.assertIsNone(_TRACKER_REF.search(text), text)
 
 
 if __name__ == "__main__":
