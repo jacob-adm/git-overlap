@@ -17,7 +17,7 @@ import tempfile
 from ._common import (EXIT_FOUND, EXIT_NOTHING, OID, Fail, check_safe, git, git_error,
                       ignore_signals, install_signal_handlers, parse_args, read_records,
                       resolve, run, show, usage_and_version, write_record,
-                      write_stderr_line)
+                      write_stderr_line, write_stdout)
 
 NAME = "pairmerge"
 USAGE = """usage: git pairmerge [-z] [--attributes FILE] < pairs
@@ -423,11 +423,14 @@ def pairmerge(argv):
                 paths = merge(tree, shas[ref_a], shas[ref_b], env, root, ref_a, ref_b)
                 if paths is None:
                     write_record((ref_a, ref_b, b"clean", b""), zero)
-                    continue
-                found = True
-                for path in paths:
-                    check_safe(path, zero, "path")
-                    write_record((ref_a, ref_b, b"conflict", path), zero)
+                else:
+                    found = True
+                    for path in paths:
+                        check_safe(path, zero, "path")
+                        write_record((ref_a, ref_b, b"conflict", path), zero)
+                # Hand each finished pair to the reader now: a long run shows progress, and a
+                # run that is stopped keeps every pair it completed (SPEC "Output timing").
+                write_stdout(None)
             except Fail as exc:
                 # Errors about this pair name its record (SPEC "Record errors").
                 raise Fail("record %d: %s" % (number, exc))
