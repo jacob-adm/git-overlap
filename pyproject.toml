@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "git-overlap"
-version = "0.1.1"
+version = "0.2.0"
 description = "Unix-style git subcommands: which files each ref changes, and which refs overlap."
 readme = "README.md"
 requires-python = ">=3.8"
