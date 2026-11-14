@@ -3,6 +3,7 @@
 git-overlap run on the open pull requests of three public GitHub repositories. Every command
 below ran as shown, and every output is copied unedited from that run. The pull request
 snapshot was taken on 13 November 2026; the runs were made on 13 and 14 November 2026.
+They were recorded with git-overlap 0.1.x, before `git pairmerge --onto` existed.
 `scripts/reproduce-use-cases.sh WORKDIR` repeats them from the pinned data (see
 [Reproduce](#reproduce)).
 

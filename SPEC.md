@@ -25,7 +25,8 @@ contract: the implementation and the tests are both written from it, separately.
   the record number (counting every record from 1, skipped empty ones included), exit 2.
 - **Options.** Only the options a command documents are options; any other argument, even one
   starting with `-`, is a positional (so a ref named `-x` works as BASE); `--` is also accepted.
-  A command given an unexpected positional exits 2.
+  A command given an unexpected positional exits 2. An option given more than once takes its last
+  value, as is usual for Unix commands.
 - **Exit status**, like grep and diff: 0 = ran, nothing found; 1 = ran, something found; 2 = error.
   On exit 2 no partial result is guaranteed; stdout may hold records written before the error.
 - **Errors** go to stderr as one line: `git-<name>: <message>`. Never a traceback. A ref or path
@@ -122,6 +123,47 @@ main: `printf 'main\tfeature\n' | git pairmerge`.
 - Conflicted paths are printed as git reports them, relative to the repository root. For a
   directory/file conflict git reports the file under a generated name `PATH~<commit id>`; the tool
   prints that name unchanged (it is deterministic, because merges are given commit ids).
+
+### --onto BASE (fixed by experiment on git 2.43.0 and 2.50.1)
+
+`git pairmerge --onto BASE` answers a different question: would the two refs conflict if both
+landed on BASE, first one then the other? Without `--onto` the behaviour above is unchanged.
+
+- BASE is resolved once, before stdin is read (same rule as every ref). An unknown BASE is exit 2.
+- **Stale refs.** Each distinct ref R is first merged onto BASE on its own
+  (`merge-tree BASE R`). If that conflicts, R is stale: it no longer merges cleanly into BASE.
+  This check uses the same pinned attribute source as the pair merge, so `--attributes` applies
+  to it too.
+- **Output per pair** (first field lands first, then the second), in input order, refs as given:
+  - either ref stale: one record per path on which the stale ref(s) conflict with BASE,
+    `refA TAB refB TAB stale TAB path`, paths sorted bytewise and listed once even if both refs
+    conflict on them; one record with an empty path if git lists none. Which ref is stale is not
+    encoded; `printf 'BASE\tREF\n' | git pairmerge` answers that for a single ref.
+  - otherwise `clean` or `conflict` records exactly as without `--onto`.
+- **Mechanism.** For each non-stale ref R, the tree of BASE+R becomes a commit M_R
+  (`commit-tree TREE -p BASE -p R`) with a fixed author and committer (name, email, date
+  `@0 +0000`), `i18n.commitEncoding=UTF-8` and `--no-gpg-sign`, so M_R's id is the same on every
+  run. M_R has the tree a landing of R would produce and BASE among its parents (git drops the
+  duplicate parent when R is BASE; a fast-forward landing would create no commit at all, but its
+  tree and ancestry, and so every verdict, are the same). The pair is then `merge-tree M_A B` with
+  git's own merge base. Every object is written to the run's private object directory, which is
+  kept for the whole run; per-ref results are computed once and reused across pairs.
+- **Edge cases** (verdicts established by experiment): A equal to B, A an ancestor of B, and B
+  already containing A are clean; a ref already merged into BASE (an ancestor of BASE) is clean;
+  criss-cross histories use git's recursive merge base.
+- **Order.** The result can depend on which ref lands first, exactly as with real merges: a ref
+  that forked before BASE and repeats a change BASE made merges cleanly when it lands first, but
+  conflicts when a ref that changed the same lines again on top of BASE lands first. The reported
+  path can also depend on order (a file renamed on BASE after one ref forked is reported under its
+  old or new name), and directory/file names embed the commit id of each side (`PATH~<id>`). The
+  first field therefore always lands first, and a repeated pair in either order is computed once,
+  at its first occurrence, so output is deterministic for a given input. To test the other order,
+  give the pair reversed in a separate run.
+- **No merge base** with `--onto`: the message names BASE and the ref that has none
+  (`record N: no merge base for BASE and REF`), N being the record that first uses that ref.
+- **Exit status** with `--onto`: 1 if any pair is stale or conflicts, else 0; 2 on error.
+- Cost: one merge per ref plus one merge per pair; a pair costs more than without `--onto`
+  because its merge base is older. Same git floor (2.43).
 
 ### Merge mechanism (fixed by experiment on git 2.50.1; floors from git release notes)
 

@@ -112,6 +112,8 @@ REAL_CONFLICTS = lines(
     ("agent/b", "agent/d", "conflict", "CHANGELOG.md"),
     ("agent/b", "agent/d", "conflict", "openapi.json"),
     ("agent/c", "agent/d", "conflict", "CHANGELOG.md"),
+    # Onto main, f is stale (it conflicts with main itself), so its pair is no conflict.
+    ("agent/f", "agent/g", "stale", "src/config.py"),
 )
 
 # Ranked by pair count; the tie between openapi.json and tools/registry.py breaks bytewise.
@@ -127,6 +129,7 @@ WHAT_IF = lines(
     ("agent/b", "agent/c", "clean", ""),
     ("agent/b", "agent/d", "conflict", "openapi.json"),
     ("agent/c", "agent/d", "clean", ""),
+    ("agent/f", "agent/g", "stale", "src/config.py"),
 )
 
 EXPECTED = {
@@ -136,8 +139,8 @@ EXPECTED = {
     "Who overlaps whom": OVERLAP_PAIRS,
     "Real conflicts": REAL_CONFLICTS,
     "Hotspots": HOTSPOTS,
-    # 6 fresh branches (stale f dropped) -> 15 pairs; the 6 pairs among a..d conflict
-    # (CHANGELOG.md); the pairs with e or g do not. With f, f/g would count as a 7th.
+    # 6 fresh branches (pairs with the stale f dropped) -> 15 pairs; the 6 pairs among a..d
+    # conflict (CHANGELOG.md); the pairs with e or g do not. Without --onto, f/g is a 7th.
     "Measured p": "conflicting pairs 6 of 15, p = 0.40\n",
     "What-if merge drivers": WHAT_IF,
     # Union clears the set and log, the pattern list drops openapi.json: one human conflict left.
@@ -407,9 +410,9 @@ class RecipesTest(unittest.TestCase):
         SPEC: "git pairmerge".
         """
         self.check("Stale branches")
-        # The filter matters: without it, the stale f/g pair is a conflict like any other.
+        # --onto matters: without it, the stale f/g pair is a conflict like any other.
         if PAIRMERGE_OK:
-            self.assertNotIn("agent/f", self.run_recipe("Real conflicts"))
+            self.assertNotIn("agent/f\tagent/g\tconflict", self.run_recipe("Real conflicts"))
 
     def test_footprint(self):
         """Recipe "Footprint": the files each agent/* branch changes (the night's raw input).

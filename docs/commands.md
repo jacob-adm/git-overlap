@@ -130,9 +130,9 @@ agent/c	agent/d	CHANGELOG.md
 - Compares paths exactly and case-sensitively; see
   [Limitations](limitations-and-security.md#limitations).
 
-## git pairmerge [--attributes FILE]
+## git pairmerge [--attributes FILE] [--onto BASE]
 
-Synopsis: `git pairmerge [-z] [--attributes FILE]`.
+Synopsis: `git pairmerge [-z] [--attributes FILE] [--onto BASE]`.
 
 Reads records whose first two fields are refs (further fields are ignored, so `git overlap`
 output pipes straight in) and merges each pair with each other, at the pair's own merge base,
@@ -152,8 +152,8 @@ agent/a	agent/b	conflict	src/app.py
 agent/a	agent/b	conflict	tools/registry.py
 ```
 
-There is no BASE argument. To ask whether a branch still merges into `main`, pair it with `main`
-(here `cut` drops the empty fourth field of the clean records):
+Without `--onto` there is no BASE. To ask whether a branch still merges into `main`, pair it
+with `main` (here `cut` drops the empty fourth field of the clean records):
 
 ```sh
 printf '%s\t%s\n' main agent/a main agent/e | git pairmerge | cut -f1-3
@@ -163,6 +163,31 @@ printf '%s\t%s\n' main agent/a main agent/e | git pairmerge | cut -f1-3
 main	agent/a	clean
 main	agent/e	clean
 ```
+
+`--onto BASE` asks a different question: would the two refs conflict if both landed on BASE,
+the first field first, then the second? Each ref is first merged into BASE on its own. A ref
+that conflicts with BASE is stale, and a pair that includes a stale ref is written as one
+`refA TAB refB TAB stale TAB path` per path on which the stale ref (or both) conflicts with
+BASE. Any other pair is merged as the first landing would leave it and written as `clean` or
+`conflict` records, as without `--onto`. At its own merge base, the pair `agent/f` and
+`agent/g` conflicts, because `agent/g` carries the change to `main` that `agent/f` conflicts
+with; onto `main` it is stale instead:
+
+```sh
+printf 'agent/f\tagent/g\n' | git pairmerge
+printf '%s\t%s\n' agent/f agent/g agent/c agent/d | git pairmerge --onto main
+```
+
+```text
+agent/f	agent/g	conflict	src/config.py
+agent/f	agent/g	stale	src/config.py
+agent/c	agent/d	conflict	CHANGELOG.md
+```
+
+A stale record does not say which ref is stale; pairing each ref with BASE, as above, does.
+The landing of the first ref is computed in memory as a merge commit with a fixed author,
+committer and date, so its id, and with it any `PATH~<id>` name in the output, is the same on
+every run. Each ref is merged into BASE once per run, however many pairs it is in.
 
 `--attributes FILE` merges as if FILE were the repository's root `.gitattributes`, without
 committing it or changing any file. FILE replaces the committed `.gitattributes` files; it is
@@ -182,8 +207,9 @@ agent/a	agent/b	conflict	openapi.json
 agent/a	agent/b	conflict	src/app.py
 ```
 
-- Exits 1 if any pair conflicts, 0 if none.
-- Does not merge into BASE or any other branch, and does not merge three or more refs together.
+- Exits 1 if any pair conflicts or, with `--onto`, is stale; 0 if none.
+- Does not change BASE or any other branch (with `--onto`, the landing exists only in memory),
+  and does not merge three or more refs together.
 - Does not write to the repository: refs, index, worktree and object store are unchanged. See
   [Security](limitations-and-security.md#security).
 - Without `--attributes`, ignores the `.gitattributes` files committed in the repository: the
@@ -227,7 +253,7 @@ Like `grep` and `diff`:
 | Status | `git footprint` | `git overlap` | `git pairmerge` |
 | :--- | :--- | :--- | :--- |
 | 0 | success | no pair shares a path | every pair merges cleanly |
-| 1 | not used | at least one pair written | at least one pair conflicts |
+| 1 | not used | at least one pair written | at least one pair conflicts or is stale |
 | 2 | error | error | error |
 
 An error is one line on standard error, `git-<name>: <message>`, never a traceback. A message
