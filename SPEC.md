@@ -115,6 +115,8 @@ main: `printf 'main\tfeature\n' | git pairmerge`.
   `CHANGELOG.md merge=union`), without committing it or changing any repository file. Mechanism and
   version floor: see the section below. An unreadable FILE is exit 2.
 - Exit 1 if any pair conflicts, else 0; 2 on error (unknown ref, git too old, merge-tree failure).
+- **Output timing.** Each pair's records are written and stdout is flushed as soon as that pair
+  is computed, so long runs show progress and a stopped run keeps every completed pair.
 - Fewer than 2 fields, or an empty first or second field, is a malformed record. A ref paired with
   itself is merged like any pair (and is clean).
 - Conflicted paths are printed as git reports them, relative to the repository root. For a
