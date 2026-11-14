@@ -1,6 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 """Every ```sh example in README.md and docs/*.md outside a Recipes section runs, exactly.
 
+Except docs/use-cases.md (NOT_RUN), whose commands are checked against its reproduce script.
+
 SPEC: "Recipes".
 
 The fence rules for README.md and every docs/*.md page, enforced by test_fences:
@@ -32,10 +34,17 @@ import subprocess
 import unittest
 
 from fixtures import PAIRMERGE_OK, Sandbox
-from test_recipes import SH, build_fixture, doc_fences, doc_files, write_wrapper
+from test_recipes import ROOT, SH, build_fixture, doc_fences, doc_files, write_wrapper
 
 # The only fence info strings the docs may use (see the module docstring).
 FENCE_INFOS = ("", "sh", "text")
+
+# Pages whose examples are not run here. docs/use-cases.md records real runs on public GitHub
+# repositories: its commands need the network and minutes per run, and its output depends on
+# those repositories, so scripts/reproduce-use-cases.sh re-runs it by hand instead, and
+# UseCasesScriptTest keeps the page's commands identical to that script's.
+NOT_RUN = ("docs/use-cases.md",)
+USE_CASES_SCRIPT = "scripts/reproduce-use-cases.sh"
 
 # pr-merge-audit snapshot refs in the bundle: name -> fixture branch it points at.
 AUDIT_REFS = (("refs/audit/base", "main"), ("refs/audit/pr/12", "agent/a"),
@@ -70,6 +79,8 @@ def doc_examples():
     """
     examples = []
     for relpath in doc_files():
+        if relpath in NOT_RUN:
+            continue
         fences, lines = doc_fences(relpath)
         for index, fence in enumerate(fences):
             where = "%s line %d" % (relpath, fence["start"])
@@ -125,6 +136,25 @@ class FenceRulesTest(unittest.TestCase):
         self.assertTrue(examples, "the docs have no ```sh examples outside Recipes")
         # The README keeps a checked example of its own (the install check and the quick start).
         self.assertIn("README.md", [relpath for relpath, _, _, _ in examples])
+
+
+class UseCasesScriptTest(unittest.TestCase):
+    """docs/use-cases.md and scripts/reproduce-use-cases.sh cannot drift apart."""
+
+    def test_every_command_is_in_the_script(self):
+        """Every ```sh block of each NOT_RUN page appears verbatim in the reproduce script, so
+        re-running the script re-runs exactly the commands the page shows."""
+        with open(os.path.join(ROOT, *USE_CASES_SCRIPT.split("/")), "r",
+                  encoding="utf-8") as handle:
+            script = handle.read()
+        for relpath in NOT_RUN:
+            fences, _ = doc_fences(relpath)
+            blocks = [fence for fence in fences if fence["info"] == "sh"]
+            self.assertTrue(blocks, "%s has no ```sh blocks" % relpath)
+            for fence in blocks:
+                with self.subTest(file=relpath, line=fence["start"]):
+                    self.assertIn(fence["body"], script, "%s line %d: command not in %s"
+                                  % (relpath, fence["start"], USE_CASES_SCRIPT))
 
 
 @unittest.skipUnless(SH, "the documented examples are POSIX sh and no `sh` is on PATH")

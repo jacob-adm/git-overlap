@@ -22,10 +22,15 @@ Branches (all from one `main` commit):
   agent/d  CHANGELOG, openapi +/orders, adds migrations/0002_orders.sql
   agent/e  adds docs/guide.md only (touches nothing shared)
 
-so that: CHANGELOG conflicts in 6 pairs, openapi.json and the registry in 3 each, src/app.py in 1
-(the one real conflict left after union attributes and the derived filter); p = 6/10; c and d
-collide on migration 0002 although git merges them cleanly; agent/e is clear for the pre-work
-check while agent/a collides.
+Then the stale case: agent/f (from the same commit) edits the DEBUG line of src/config.py; main
+moves on, changing that line too; agent/g, cut from the moved main, edits only the LOG line. f no
+longer merges into main, and f/g conflict at their own merge base although g's own edit does not
+touch f's line.
+
+so that: agent/f is the one stale branch; among the fresh branches, CHANGELOG conflicts in 6
+pairs, openapi.json and the registry in 3 each, src/app.py in 1 (the one real conflict left after
+union attributes and the derived filter); p = 6/15; c and d collide on migration 0002 although
+git merges them cleanly; agent/e is clear for the pre-work check while agent/a collides.
 
 The commands run as `python -m git_overlap.<name>` through small `git-<name>` sh wrappers in a
 temporary bin directory prepended to PATH, so `git footprint` resolves exactly as it would for an
@@ -80,12 +85,15 @@ FOOTPRINT = lines(
     ("agent/d", "M", "CHANGELOG.md"), ("agent/d", "A", "migrations/0002_orders.sql"),
     ("agent/d", "M", "openapi.json"),
     ("agent/e", "A", "docs/guide.md"),
+    ("agent/f", "M", "src/config.py"),
+    ("agent/g", "M", "src/config.py"),
 )
 
-# Every pair among a..d shares CHANGELOG.md; agent/e shares nothing.
+# Every pair among a..d shares CHANGELOG.md; agent/e shares nothing; f and g share src/config.py.
 OVERLAP_PAIRS = lines(
     ("agent/a", "agent/b"), ("agent/a", "agent/c"), ("agent/a", "agent/d"),
     ("agent/b", "agent/c"), ("agent/b", "agent/d"), ("agent/c", "agent/d"),
+    ("agent/f", "agent/g"),
 )
 
 # git's plain line merge: each pair conflicts on every shared file (all edits hit the same lines);
@@ -122,12 +130,15 @@ WHAT_IF = lines(
 )
 
 EXPECTED = {
+    # agent/f edits the DEBUG line that main changed later; every other branch merges cleanly.
+    "Stale branches": lines(("agent/f", "src/config.py")),
     "Footprint": FOOTPRINT,
     "Who overlaps whom": OVERLAP_PAIRS,
     "Real conflicts": REAL_CONFLICTS,
     "Hotspots": HOTSPOTS,
-    # 5 branches -> 10 pairs; the 6 pairs among a..d conflict (CHANGELOG.md), the 4 with e do not.
-    "Measured p": "conflicting pairs 6 of 10, p = 0.60\n",
+    # 6 fresh branches (stale f dropped) -> 15 pairs; the 6 pairs among a..d conflict
+    # (CHANGELOG.md); the pairs with e or g do not. With f, f/g would count as a 7th.
+    "Measured p": "conflicting pairs 6 of 15, p = 0.40\n",
     "What-if merge drivers": WHAT_IF,
     # Union clears the set and log, the pattern list drops openapi.json: one human conflict left.
     "Derived files": lines(("agent/a", "agent/b", "conflict", "src/app.py")),
@@ -244,7 +255,7 @@ def write_wrapper(bin_dir, name, module):
 
 
 def build_fixture(sandbox):
-    """Create the article's night as a real repository: `main` plus agent/a..agent/e (see top).
+    """Create the article's night as a real repository: `main` plus agent/a..agent/g (see top).
 
     SPEC: "Recipes".
     """
@@ -252,12 +263,15 @@ def build_fixture(sandbox):
     registry = 'TOOLS = [\n    "search",\n]\n'
     changelog = "# Changelog\n\n## Unreleased\n\n## 1.0.0\n- First release.\n"
     openapi = '{\n  "paths": [\n    "/search"\n  ]\n}\n'
+    # Five settings, so an edit to the first line and one to the last merge cleanly.
+    config = "DEBUG = False\nPORT = 8000\nHOST = 'localhost'\nWORKERS = 1\nLOG = 'info'\n"
     base = repo.commit(None, {
         "tools/registry.py": registry,
         "CHANGELOG.md": changelog,
         "openapi.json": openapi,
         "migrations/0001_init.sql": "CREATE TABLE tools (name TEXT);\n",
         "src/app.py": "TIMEOUT = 10\n",
+        "src/config.py": config,
     }, ref="refs/heads/main")
 
     def add_tool(name):
@@ -309,6 +323,15 @@ def build_fixture(sandbox):
                        "migrations/0002_orders.sql": "CREATE TABLE orders (id INT);\n"},
                 ref="refs/heads/agent/d")
     repo.commit(base, {"docs/guide.md": "# Guide\n"}, ref="refs/heads/agent/e")
+    # Stale: agent/f edits the DEBUG line that main then changes too, so f no longer merges.
+    moved = config.replace("DEBUG = False", "DEBUG = True")
+    repo.commit(base, {"src/config.py": config.replace("DEBUG = False", "DEBUG = None")},
+                ref="refs/heads/agent/f")
+    later = repo.commit(base, {"src/config.py": moved}, ref="refs/heads/main")
+    # Fresh: agent/g, cut from the later main, edits only the LOG line. Merged with agent/f at
+    # their own merge base (the first commit), g carries main's DEBUG change, so f/g conflict.
+    repo.commit(later, {"src/config.py": moved.replace("LOG = 'info'", "LOG = 'debug'")},
+                ref="refs/heads/agent/g")
     return repo
 
 
@@ -378,6 +401,16 @@ class RecipesTest(unittest.TestCase):
         self.assertEqual(len(headings), len(set(headings)), "one ```sh block per recipe heading")
         self.assertEqual(sorted(headings), sorted(EXPECTED))
 
+    def test_stale_branches(self):
+        """Recipe "Stale branches": main paired with each branch; only agent/f conflicts.
+
+        SPEC: "git pairmerge".
+        """
+        self.check("Stale branches")
+        # The filter matters: without it, the stale f/g pair is a conflict like any other.
+        if PAIRMERGE_OK:
+            self.assertNotIn("agent/f", self.run_recipe("Real conflicts"))
+
     def test_footprint(self):
         """Recipe "Footprint": the files each agent/* branch changes (the night's raw input).
 
@@ -407,7 +440,7 @@ class RecipesTest(unittest.TestCase):
         self.check("Hotspots")
 
     def test_measured_p(self):
-        """Recipe "Measured p": conflicting pairs over all n(n-1)/2 pairs, generated by awk.
+        """Recipe "Measured p": conflicting pairs over all n(n-1)/2 pairs of fresh branches.
 
         SPEC: "Recipes".
         """
