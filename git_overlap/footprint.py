@@ -21,13 +21,14 @@ For each ref on stdin, list the files it changes compared with its merge base wi
   --version   show the version"""
 
 
-def merge_base(base_sha, sha, ref):
+def merge_base(base_sha, sha, ref, base):
     """Return the merge base of BASE and one ref.
 
     Args:
         base_sha: BASE's commit id (bytes).
         sha: The ref's commit id (bytes).
         ref: The ref as the caller wrote it, for messages.
+        base: BASE as the caller wrote it, for messages.
 
     Returns:
         The merge base commit id (bytes).
@@ -40,7 +41,7 @@ def merge_base(base_sha, sha, ref):
     code, out, err = git(["merge-base", base_sha, sha])
     # merge-base exits 1 with no output when there is no common ancestor.
     if code == 1 and not out.strip():
-        raise Fail("no merge base between BASE and %s" % show(ref))
+        raise Fail("no merge base between %s and %s" % (show(base), show(ref)))
     if code != 0:
         raise Fail("git merge-base failed for %s: %s" % (show(ref), git_error(err, code)))
     # Without --all, merge-base prints one best common ancestor; keep just its id.
@@ -124,7 +125,7 @@ def footprint(argv):
     # Second pass: list each ref's files, refs in input order.
     for number, ref, sha in refs:
         try:
-            mb = merge_base(base_sha, sha, ref)
+            mb = merge_base(base_sha, sha, ref, positionals[0])
             for status, path in changed_files(mb, sha):
                 check_safe(path, zero, "path")
                 # The ref is printed exactly as the caller wrote it.

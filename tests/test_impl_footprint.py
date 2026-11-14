@@ -160,7 +160,7 @@ class FootprintTest(unittest.TestCase):
                  (["main"], tree + b"\n"), (["main"], b"lonely\n")]
         # Errors about a record carry its number; errors about BASE do not.
         code, _, err = tool("footprint", self.repo, ["main"], b"feat\nlonely\n")
-        self.assertEqual(err, b"git-footprint: record 2: no merge base between BASE and lonely\n")
+        self.assertEqual(err, b"git-footprint: record 2: no merge base between main and lonely\n")
         code, _, err = tool("footprint", self.repo, ["nosuch"], b"feat\n")
         self.assertEqual(err, b"git-footprint: unknown ref or not a commit: nosuch\n")
         for args, stdin in cases:

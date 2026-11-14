@@ -34,7 +34,7 @@ contract: the implementation and the tests are both written from it, separately.
   on every platform (no CR LF on Windows).
 - **Unterminated last record.** A final record without its LF or NUL is accepted.
 - **Standard streams.** `-h` and `--version` print to stdout and exit 0, taking precedence over
-  any other argument. If file descriptor 0 or 1 is not open at all (`<&-`, `>&-`), the command
+  any other argument, except where `-h` is the value of an option that takes one (`--with -h`). If file descriptor 0 or 1 is not open at all (`<&-`, `>&-`), the command
   exits 2 with `standard input is not open` / `standard output is not open`. A reader closing the
   pipe early (EPIPE, e.g. `| head`) is not an error: exit 0, quietly.
 - **Paths are relative to the repository root**, whatever subdirectory the command runs in, in
@@ -123,8 +123,8 @@ main: `printf 'main\tfeature\n' | git pairmerge`.
 
 ### Merge mechanism (fixed by experiment on git 2.50.1; floors from git release notes)
 
-- Each ref is first checked with `git rev-parse --verify --quiet --end-of-options REF^{commit}`;
-  failure is exit 2 before any merge runs.
+- Each ref is resolved as in the common rule "Resolving a ref"; failure is exit 2 before any
+  merge runs.
 - Per pair: `git --attr-source=T merge-tree --write-tree -z --name-only --no-messages
   --end-of-options A B`. Exit 0 = clean. Exit 1 **and** a first NUL field that is a 40- or 64-hex
   object id = conflict; the remaining fields are the conflicted paths. Anything else (another exit
@@ -146,7 +146,8 @@ main: `printf 'main\tfeature\n' | git pairmerge`.
   is how a syntax-aware driver such as Mergiraf can be evaluated). The README states this.
 - merge-tree runs at the repository root (or the git directory of a bare repository), so the
   paths it prints are root-relative.
-- **Nothing is written to the repository.** All git calls of `git pairmerge` run with
+- **Nothing is written to the repository.** Every git call of `git pairmerge` that can write
+  objects (`hash-object`, `mktree`, `merge-tree`) runs with
   `GIT_OBJECT_DIRECTORY` set to a private temporary directory and
   `GIT_ALTERNATE_OBJECT_DIRECTORIES` set to the repository's own object directory (absolute path
   from `git rev-parse --git-path objects`). That variable is a path-separator list, so an entry
@@ -162,7 +163,7 @@ main: `printf 'main\tfeature\n' | git pairmerge`.
   crashed with it until 2.43). The command reads `git version` and exits 2 with a message naming
   the floor if git is older. `git footprint` and `git overlap` keep the 2.38 floor.
 
-## Recipes (HNET-216)
+## Recipes
 
 The README recipes are part of the contract: the test suite runs every one of them against a
 fixture repository and checks the output.
