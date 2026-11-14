@@ -75,17 +75,23 @@ agent/a	agent/d	conflict
 agent/b	agent/c	conflict
 agent/b	agent/d	conflict
 agent/c	agent/d	conflict
+agent/f	agent/g	conflict
 ```
 
 Each line is a pair of branches that conflict when merged with each other. Drop
 `| cut -f1-3 | uniq` to see the conflicted files. `agent/e` shares no file with any other
 branch, so `git overlap` passes on no pair that includes it and `git pairmerge` never merges it.
+`agent/f` no longer merges into `main`, which is why it conflicts with `agent/g`; the
+[Stale branches](docs/recipes.md#stale-branches-which-branches-no-longer-merge-into-the-base)
+recipe finds such branches, and the other recipes leave them out.
 
 ## Documentation
 
 - [Commands](docs/commands.md): each command's input, output, options and exit status, with
   examples.
 - [Recipes](docs/recipes.md): pipelines that find hotspots, measure p and test merge drivers.
+- [Use cases](docs/use-cases.md): real runs on three public repositories, with recorded output
+  and timings.
 - [Limitations and security](docs/limitations-and-security.md): what the commands miss, read
   and write.
 - [Using it with other tools](docs/other-tools.md): pr-merge-audit, line-oriented tools and
