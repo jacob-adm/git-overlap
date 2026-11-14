@@ -123,6 +123,38 @@ main: `printf 'main\tfeature\n' | git pairmerge`.
   directory/file conflict git reports the file under a generated name `PATH~<commit id>`; the tool
   prints that name unchanged (it is deterministic, because merges are given commit ids).
 
+### --onto BASE (fixed by experiment on git 2.43.0 and 2.50.1)
+
+`git pairmerge --onto BASE` answers a different question: would the two refs conflict if both
+landed on BASE, first one then the other? Without `--onto` the behaviour above is unchanged.
+
+- BASE is resolved once, before stdin is read (same rule as every ref). An unknown BASE is exit 2.
+- **Stale refs.** Each distinct ref R is first merged onto BASE on its own
+  (`merge-tree BASE R`). If that conflicts, R is stale: it no longer merges cleanly into BASE.
+- **Output per pair** (first field lands first, then the second), in input order, refs as given:
+  - either ref stale: one record per path on which the stale ref(s) conflict with BASE,
+    `refA TAB refB TAB stale TAB path`, paths sorted bytewise and listed once even if both refs
+    conflict on them; one record with an empty path if git lists none. Which ref is stale is not
+    encoded; `printf 'BASE\tREF\n' | git pairmerge` answers that for a single ref.
+  - otherwise `clean` or `conflict` records exactly as without `--onto`.
+- **Mechanism.** For each non-stale ref R, the tree of BASE+R becomes a commit M_R
+  (`commit-tree TREE -p BASE -p R`) with a fixed author and committer (name, email, date
+  `@0 +0000`), `i18n.commitEncoding=UTF-8` and `--no-gpg-sign`, so M_R's id is the same on every
+  run; M_R is the merge commit landing R would create. The pair is then `merge-tree M_A B` with
+  git's own merge base. Every object is written to the run's private object directory, which is
+  kept for the whole run; per-ref results are computed once and reused across pairs.
+- **Edge cases** (verdicts established by experiment): A equal to B, A an ancestor of B, and B
+  already containing A are clean; a ref already merged into BASE (an ancestor of BASE) is clean;
+  criss-cross histories use git's recursive merge base.
+- **Order.** No case was found where the clean/conflict verdict depends on which ref lands first,
+  but the reported path can (a file renamed on BASE after one ref forked is reported under its old
+  or new name), and directory/file names embed the commit id of each side (`PATH~<id>`). The first
+  field therefore always lands first, and a repeated pair in either order is computed once, at its
+  first occurrence, so output is deterministic for a given input.
+- **Exit status** with `--onto`: 1 if any pair is stale or conflicts, else 0; 2 on error.
+- Cost: one merge per ref plus one merge per pair; a pair costs more than without `--onto`
+  because its merge base is older. Same git floor (2.43).
+
 ### Merge mechanism (fixed by experiment on git 2.50.1; floors from git release notes)
 
 - Each ref is resolved as in the common rule "Resolving a ref"; failure is exit 2 before any
