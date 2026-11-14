@@ -25,3 +25,15 @@ jobs:
       - run: |
           python -m pip install .
           git footprint -h
+
+  # The package PyPI would receive: built and checked on every change, not only at release.
+  package:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: python -m pip install build twine
+      - run: python -m build
+      - run: python -m twine check --strict dist/*

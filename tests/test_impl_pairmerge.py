@@ -310,6 +310,62 @@ class PairmergeTest(unittest.TestCase):
 
 
 @unittest.skipUnless(HAS_FLOOR, "git pairmerge needs git 2.43 or later")
+class StreamingTest(unittest.TestCase):
+    """Many clean pairs whose records together fit in one stdout buffer: without a flush per
+    pair, nothing would reach the reader until the run ended.
+
+    SPEC: "git pairmerge" (output timing).
+    """
+
+    BRANCHES = 25
+
+    def setUp(self):
+        """Build branches s00..s24, each adding its own file, so every pair merges cleanly."""
+        self.repo = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.repo, ignore_errors=True)
+        repo = self.repo
+        git(repo, "init", "-q", "-b", "main")
+        write(repo, "base.txt", "base\n")
+        git(repo, "add", "base.txt")
+        git(repo, "commit", "-q", "-m", "base")
+        self.names = ["s%02d" % i for i in range(self.BRANCHES)]
+        for name in self.names:
+            # One file per branch: no pair touches a common path, so all pairs are clean.
+            git(repo, "switch", "-q", "-c", name, "main")
+            write(repo, name + ".txt", name + "\n")
+            git(repo, "add", name + ".txt")
+            git(repo, "commit", "-q", "-m", name)
+        git(repo, "switch", "-q", "main")
+
+    def test_first_pair_reaches_the_reader_long_before_the_run_ends(self):
+        """The first record arrives early in the run, not when the run ends.
+
+        Timing, not process state, is the evidence: a process that has written everything can
+        still look alive for an instant before it is reaped.
+        """
+        # 300 pairs of about 18 bytes each: under the 8 KB buffer, so only a flush releases them.
+        pairs = [(a, b) for i, a in enumerate(self.names) for b in self.names[i + 1:]]
+        stdin = b"".join(b"%s\t%s\n" % (a.encode(), b.encode()) for a, b in pairs)
+        proc = subprocess.Popen([sys.executable, "-m", "git_overlap.pairmerge"], cwd=self.repo,
+                                env=dict(os.environ, PYTHONPATH=ROOT), stdin=subprocess.PIPE,
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.addCleanup(proc.stderr.close)
+        self.addCleanup(proc.stdout.close)
+        proc.stdin.write(stdin)
+        proc.stdin.close()
+        start = time.time()
+        first = proc.stdout.readline()
+        first_at = time.time() - start
+        rest = proc.stdout.read()
+        end_at = time.time() - start
+        proc.wait(timeout=60)
+        self.assertEqual(first, b"s00\ts01\tclean\t\n")
+        self.assertEqual(rest.count(b"\n"), len(pairs) - 1)
+        # Flushed per pair, the first record comes after one pair's work; buffered, at the end.
+        self.assertLess(first_at, end_at / 2, "first record %.2fs, run %.2fs" % (first_at, end_at))
+
+
+@unittest.skipUnless(HAS_FLOOR, "git pairmerge needs git 2.43 or later")
 @unittest.skipIf(os.name == "nt", "signals and blocked pipes are tested on POSIX only")
 class BlockedWriterTest(unittest.TestCase):
     """A pair conflicting in many long paths: its output overfills the pipe, so git pairmerge

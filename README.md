@@ -13,7 +13,7 @@ reordered or fixed first.
 git-overlap was inspired by Xuchen Yao's article
 ["Rethinking Merging and Continous Integration for Agentic Workflows"](https://www.linkedin.com/pulse/rethinking-merging-continous-integration-agentic-workflows-xuchen-yao-jkaxc/)
 (4 November 2026). It covers the measurement side the article calls for; see
-[Relation to the article](docs/article.md).
+[Relation to the article](https://github.com/jacob-adm/git-overlap/blob/main/docs/article.md).
 
 ## Requirements and portability
 
@@ -22,7 +22,7 @@ git-overlap was inspired by Xuchen Yao's article
   message naming 2.43. git must be an executable named `git` on `PATH`.
 - Linux, macOS and Windows, all tested in CI.
 - The examples are POSIX `sh`; on Windows, run them from Git Bash. Windows has two further
-  limits on refs and git shims; see [Limitations](docs/limitations-and-security.md#limitations).
+  limits on refs and git shims; see [Limitations](https://github.com/jacob-adm/git-overlap/blob/main/docs/limitations-and-security.md#limitations).
 
 ## Install
 
@@ -61,7 +61,7 @@ page. Without installing, each command also runs from a clone as
 Inside the repository to check, list its branches one per line and pipe them through the three
 commands. Replace `main` with the base branch and `refs/heads/agent/` with the refs to check,
 for example `refs/remotes/origin/` for every branch fetched from `origin`. Below, the commands
-run in the [example repository](docs/commands.md#example-repository).
+run in the [example repository](https://github.com/jacob-adm/git-overlap/blob/main/docs/commands.md#example-repository).
 
 ```sh
 git for-each-ref --format='%(refname:short)' refs/heads/agent/ |
@@ -82,23 +82,23 @@ Each line is a pair of branches that conflict when merged with each other. Drop
 `| cut -f1-3 | uniq` to see the conflicted files. `agent/e` shares no file with any other
 branch, so `git overlap` passes on no pair that includes it and `git pairmerge` never merges it.
 `agent/f` no longer merges into `main`, which is why it conflicts with `agent/g`; the
-[Stale branches](docs/recipes.md#stale-branches-which-branches-no-longer-merge-into-the-base)
+[Stale branches](https://github.com/jacob-adm/git-overlap/blob/main/docs/recipes.md#stale-branches-which-branches-no-longer-merge-into-the-base)
 recipe finds such branches, and the other recipes leave them out.
 
 ## Documentation
 
-- [Commands](docs/commands.md): each command's input, output, options and exit status, with
+- [Commands](https://github.com/jacob-adm/git-overlap/blob/main/docs/commands.md): each command's input, output, options and exit status, with
   examples.
-- [Recipes](docs/recipes.md): pipelines that find hotspots, measure p and test merge drivers.
-- [Use cases](docs/use-cases.md): real runs on three public repositories, with recorded output
+- [Recipes](https://github.com/jacob-adm/git-overlap/blob/main/docs/recipes.md): pipelines that find hotspots, measure p and test merge drivers.
+- [Use cases](https://github.com/jacob-adm/git-overlap/blob/main/docs/use-cases.md): real runs on three public repositories, with recorded output
   and timings.
-- [Limitations and security](docs/limitations-and-security.md): what the commands miss, read
+- [Limitations and security](https://github.com/jacob-adm/git-overlap/blob/main/docs/limitations-and-security.md): what the commands miss, read
   and write.
-- [Using it with other tools](docs/other-tools.md): pr-merge-audit, line-oriented tools and
+- [Using it with other tools](https://github.com/jacob-adm/git-overlap/blob/main/docs/other-tools.md): pr-merge-audit, line-oriented tools and
   bug-age.
-- [Relation to the article](docs/article.md): what the article finds and which parts are
+- [Relation to the article](https://github.com/jacob-adm/git-overlap/blob/main/docs/article.md): what the article finds and which parts are
   covered.
-- [SPEC.md](SPEC.md): the full reference: every option, record format, error and edge case.
+- [SPEC.md](https://github.com/jacob-adm/git-overlap/blob/main/SPEC.md): the full reference: every option, record format, error and edge case.
 
 ## Licence
 
