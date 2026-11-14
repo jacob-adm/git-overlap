@@ -146,11 +146,14 @@ landed on BASE, first one then the other? Without `--onto` the behaviour above i
 - **Edge cases** (verdicts established by experiment): A equal to B, A an ancestor of B, and B
   already containing A are clean; a ref already merged into BASE (an ancestor of BASE) is clean;
   criss-cross histories use git's recursive merge base.
-- **Order.** No case was found where the clean/conflict verdict depends on which ref lands first,
-  but the reported path can (a file renamed on BASE after one ref forked is reported under its old
-  or new name), and directory/file names embed the commit id of each side (`PATH~<id>`). The first
-  field therefore always lands first, and a repeated pair in either order is computed once, at its
-  first occurrence, so output is deterministic for a given input.
+- **Order.** The result can depend on which ref lands first, exactly as with real merges: a ref
+  that forked before BASE and repeats a change BASE made merges cleanly when it lands first, but
+  conflicts when a ref that changed the same lines again on top of BASE lands first. The reported
+  path can also depend on order (a file renamed on BASE after one ref forked is reported under its
+  old or new name), and directory/file names embed the commit id of each side (`PATH~<id>`). The
+  first field therefore always lands first, and a repeated pair in either order is computed once,
+  at its first occurrence, so output is deterministic for a given input. To test the other order,
+  give the pair reversed in a separate run.
 - **Exit status** with `--onto`: 1 if any pair is stale or conflicts, else 0; 2 on error.
 - Cost: one merge per ref plus one merge per pair; a pair costs more than without `--onto`
   because its merge base is older. Same git floor (2.43).
