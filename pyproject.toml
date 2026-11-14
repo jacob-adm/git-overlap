@@ -1,0 +1,20 @@
+# SPDX-License-Identifier: Apache-2.0
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "git-overlap"
+version = "0.1.0"
+description = "Unix-style git subcommands: which files each ref changes, and which refs overlap."
+requires-python = ">=3.8"
+license = {text = "Apache-2.0"}
+dependencies = []
+
+[project.scripts]
+git-footprint = "git_overlap.footprint:main"
+git-overlap = "git_overlap.overlap:main"
+git-pairmerge = "git_overlap.pairmerge:main"
+
+[tool.setuptools]
+packages = ["git_overlap"]
