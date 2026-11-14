@@ -29,7 +29,7 @@ git-overlap was inspired by Xuchen Yao's article
 From a release tag:
 
 ```
-pip install git+https://github.com/jacob-adm/git-overlap@v0.2.0
+pip install git+https://github.com/jacob-adm/git-overlap@v0.3.0
 ```
 
 From a clone:
@@ -49,7 +49,7 @@ git footprint --version
 ```
 
 ```text
-git-footprint 0.2.0
+git-footprint 0.3.0
 ```
 
 Use `-h` for usage: `git footprint --help` is answered by git itself, which looks for a manual

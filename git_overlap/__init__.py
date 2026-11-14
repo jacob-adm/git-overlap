@@ -17,4 +17,4 @@ Documentation conventions, enforced by tests/test_documentation.py:
 
 # Single source of the version string, printed by every command's --version
 # (SPEC.md "Common rules": `--version` prints `git-<name> <version>`).
-__version__ = "0.2.0"
+__version__ = "0.3.0"
