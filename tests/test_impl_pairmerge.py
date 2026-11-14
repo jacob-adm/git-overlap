@@ -309,6 +309,193 @@ class PairmergeTest(unittest.TestCase):
         self.assertEqual(os.listdir(tmp), [])
 
 
+# Seven settings: lines 1, 4 and 7 (DEBUG, PORT, LOG) are two unchanged lines apart, so edits to
+# different ones merge cleanly.
+CONFIG = "DEBUG = False\nA = 1\nB = 2\nPORT = 8000\nC = 3\nD = 4\nLOG = 'info'\n"
+
+
+@unittest.skipUnless(HAS_FLOOR, "git pairmerge needs git 2.43 or later")
+class OntoTest(unittest.TestCase):
+    """git pairmerge --onto main, against a main that moved on after most branches were cut.
+
+    Cut from the first commit: a and b (same line of shared.txt), e (adds e.txt), f (DEBUG
+    line, which main then changes: stale), k (notes.txt, which main then changes: stale), x
+    (the PORT line, later squash-merged into main as the same change), old (merged into main),
+    df1 (adds the file d) and df2 (adds d/x), a2 (on top of a), m (e with a merged in). Cut
+    from the moved main: g (LOG line) and y (PORT line again, after x's change).
+
+    SPEC: "--onto BASE".
+    """
+
+    def setUp(self):
+        """Build the fixture; main moves on with DEBUG, notes.txt, x's change and old merged."""
+        self.repo = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.repo, ignore_errors=True)
+        git(self.repo, "init", "-q", "-b", "main")
+        self.commit("main", "main", {"config.txt": CONFIG, "shared.txt": "shared\n",
+                                     "notes.txt": "notes\n"})
+        for name, files in (("a", {"shared.txt": "a\n"}), ("b", {"shared.txt": "b\n"}),
+                            ("e", {"e.txt": "e\n"}), ("k", {"notes.txt": "k\n"}),
+                            ("f", {"config.txt": CONFIG.replace("False", "None")}),
+                            ("x", {"config.txt": CONFIG.replace("8000", "9000")}),
+                            ("old", {"old.txt": "old\n"}), ("df1", {"d": "file\n"}),
+                            ("df2", {"d/x": "dir\n"})):
+            self.commit(name, "main", files)
+        self.commit("a2", "a", {"shared.txt": "a2\n"})
+        git(self.repo, "switch", "-q", "-c", "m", "e")
+        git(self.repo, "merge", "-q", "--no-edit", "a")
+        # main moves on: f and k go stale; x lands as a squash (same content, other commit).
+        git(self.repo, "switch", "-q", "main")
+        moved = CONFIG.replace("False", "True")
+        self.commit("main", "main", {"config.txt": moved, "notes.txt": "main\n"})
+        self.commit("main", "main", {"config.txt": moved.replace("8000", "9000")})
+        git(self.repo, "merge", "-q", "--no-ff", "--no-edit", "old")
+        self.commit("g", "main", {"config.txt": moved.replace("8000", "9000")
+                                  .replace("'info'", "'debug'")})
+        self.commit("y", "main", {"config.txt": moved.replace("8000", "9001")})
+        git(self.repo, "switch", "-q", "main")
+
+    def commit(self, branch, start, files):
+        """Commit `files` ({path: text}) on `branch`, created from `start` unless it is `start`
+        (then `branch` must be checked out already, or be the unborn first branch)."""
+        if branch != start:
+            git(self.repo, "switch", "-q", "-c", branch, start)
+        for path, text in files.items():
+            write(self.repo, path, text)
+            git(self.repo, "add", path)
+        git(self.repo, "commit", "-q", "-m", branch)
+
+    def pairmerge(self, args, stdin, extra_env=None):
+        """Run git pairmerge in the fixture; return (exit code, stdout, stderr)."""
+        return tool("pairmerge", self.repo, args, stdin, extra_env)
+
+    def test_stale_ref_is_stale_and_its_partner_is_fine(self):
+        """f is stale: its pairs are `stale` (not `conflict`); e and g land cleanly together.
+
+        SPEC: "--onto BASE" (Stale refs, Output per pair, Exit status).
+        """
+        # f no longer merges into main: the single-ref check the SPEC points to.
+        self.assertEqual(self.pairmerge([], b"main\tf\n")[:2],
+                         (1, b"main\tf\tconflict\tconfig.txt\n"))
+        code, out, err = self.pairmerge(["--onto", "main"], b"f\tg\ne\tf\ne\tg\n")
+        self.assertEqual((code, err), (1, b""))
+        self.assertEqual(out, b"f\tg\tstale\tconfig.txt\ne\tf\tstale\tconfig.txt\ne\tg\tclean\t\n")
+        # Without f, nothing is found: exit 0.
+        self.assertEqual(self.pairmerge(["--onto=main"], b"e\tg\n")[:2], (0, b"e\tg\tclean\t\n"))
+
+    def test_stale_paths_are_the_union_of_both_sides(self):
+        """Both refs stale on different files: both paths, sorted; one path listed once.
+
+        SPEC: "--onto BASE" (Output per pair).
+        """
+        code, out, _ = self.pairmerge(["--onto", "main"], b"k\tf\nf\tf\n")
+        self.assertEqual((code, out), (1, b"k\tf\tstale\tconfig.txt\nk\tf\tstale\tnotes.txt\n"
+                                           b"f\tf\tstale\tconfig.txt\n"))
+
+    def test_fresh_refs_conflict_only_when_both_land(self):
+        """a and b each land cleanly on main; together they conflict on shared.txt.
+
+        SPEC: "--onto BASE" (Output per pair).
+        """
+        code, out, _ = self.pairmerge(["--onto", "main"], b"a\te\nb\te\na\tb\nb\ta\n")
+        # b/a repeats a/b in the other order: computed once, at its first occurrence.
+        self.assertEqual((code, out), (1, b"a\te\tclean\t\nb\te\tclean\t\n"
+                                           b"a\tb\tconflict\tshared.txt\n"))
+
+    def test_conflict_at_own_merge_base_but_clean_onto_base(self):
+        """x (behind main, its change already squashed in) and y (a later edit of that line)
+        conflict at their own merge base, and land cleanly one after the other; the stale f
+        and g conflict at their own merge base, and onto main are stale, not a conflict.
+
+        SPEC: "--onto BASE" (the question it answers) and "git pairmerge".
+        """
+        stdin = b"x\ty\nf\tg\n"
+        self.assertEqual(self.pairmerge([], stdin)[:2],
+                         (1, b"x\ty\tconflict\tconfig.txt\nf\tg\tconflict\tconfig.txt\n"))
+        self.assertEqual(self.pairmerge(["--onto", "main"], stdin)[:2],
+                         (1, b"x\ty\tclean\t\nf\tg\tstale\tconfig.txt\n"))
+
+    def test_ancestry_edge_cases_are_clean(self):
+        """A ancestor of B (either order), B containing A by a merge, A merged into BASE, and A
+        paired with itself are all clean.
+
+        SPEC: "--onto BASE" (Edge cases).
+        """
+        stdin = b"a\ta2\na2\ta\na\tm\nm\ta\nold\ta\nold\tmain\na\ta\n"
+        code, out, err = self.pairmerge(["--onto", "main"], stdin)
+        self.assertEqual((code, err), (0, b""))
+        # "a2\ta" repeats "a\ta2" and "m\ta" repeats "a\tm": each pair is written once.
+        self.assertEqual(out, b"a\ta2\tclean\t\na\tm\tclean\t\nold\ta\tclean\t\n"
+                              b"old\tmain\tclean\t\na\ta\tclean\t\n")
+
+    def test_directory_file_name_is_deterministic(self):
+        """The PATH~<id> name of a directory/file conflict is the same on every run, whatever
+        identity and date the caller's environment sets.
+
+        SPEC: "--onto BASE" (Mechanism, Order) and "Determinism".
+        """
+        runs = []
+        for stamp in ("@1000000000 +0100", "@2000000000 -0700"):
+            # Caller variables that would change M_df1's id if the landing commit used them.
+            env = {"GIT_AUTHOR_NAME": stamp, "GIT_AUTHOR_EMAIL": "a@b", "GIT_AUTHOR_DATE": stamp,
+                   "GIT_COMMITTER_NAME": stamp, "GIT_COMMITTER_DATE": stamp, "TZ": "Asia/Tokyo"}
+            runs.append(self.pairmerge(["--onto", "main"], b"df1\tdf2\n", env)[:2])
+        self.assertEqual(runs[0], runs[1])
+        code, out = runs[0]
+        self.assertEqual(code, 1)
+        # The file d is reported under git's generated name, carrying the landing commit's id.
+        self.assertRegex(out, rb"\Adf1\tdf2\tconflict\td~[0-9a-f]{40}\n")
+
+    def test_object_store_unchanged(self):
+        """Landing commits and every merge go to the private directory: .git/objects is as before.
+
+        SPEC: "--onto BASE" (Mechanism) and "Merge mechanism" (nothing is written).
+        """
+        before = object_store(self.repo)
+        self.pairmerge(["--onto", "main"], b"a\tb\nf\tg\nx\ty\ndf1\tdf2\n")
+        self.assertEqual(object_store(self.repo), before)
+
+    def test_usage_errors(self):
+        """An empty or missing BASE is a usage error; an unknown BASE fails before stdin is read.
+
+        SPEC: "--onto BASE", "Options", "Record errors" and "Resolving a ref".
+        """
+        for args in (["--onto="], ["--onto", ""], ["--onto"]):
+            code, out, err = self.pairmerge(args, b"a\tb\n")
+            self.assertEqual((code, out), (2, b""), args)
+            self.assertRegex(err, rb"\Agit-pairmerge: [^\n]*--onto[^\n]*\n\Z")
+        # The record is malformed too, but BASE is resolved first: no "record N: " prefix.
+        code, out, err = self.pairmerge(["--onto", "nosuch"], b"a\n")
+        self.assertEqual((code, out, err),
+                         (2, b"", b"git-pairmerge: unknown ref or not a commit: nosuch\n"))
+        # -h is the value here, not the help option: it is an unknown BASE.
+        self.assertEqual(self.pairmerge(["--onto", "-h"], b"a\tb\n")[0], 2)
+        code, out, _ = self.pairmerge(["-h"], b"")
+        self.assertEqual(code, 0)
+        self.assertIn(b"--onto BASE", out)
+
+    def test_unrelated_base_names_the_record(self):
+        """A ref with no merge base with BASE: exit 2 naming BASE, the ref and the record.
+
+        SPEC: "Shallow or unrelated histories" and "Record errors".
+        """
+        git(self.repo, "switch", "-q", "--orphan", "orphan")
+        write(self.repo, "o.txt", "o\n")
+        git(self.repo, "add", "o.txt")
+        git(self.repo, "commit", "-q", "-m", "orphan")
+        code, out, err = self.pairmerge(["--onto", "main"], b"a\tb\na\torphan\n")
+        self.assertEqual(code, 2)
+        self.assertEqual(err, b"git-pairmerge: record 2: no merge base for main and orphan\n")
+
+    def test_z_mode(self):
+        """-z applies to --onto records as to any other.
+
+        SPEC: "Records" and "--onto BASE".
+        """
+        code, out, _ = self.pairmerge(["-z", "--onto", "main"], b"f\tg\0a\tb\0")
+        self.assertEqual((code, out), (1, b"f\tg\tstale\tconfig.txt\0a\tb\tconflict\tshared.txt\0"))
+
+
 @unittest.skipUnless(HAS_FLOOR, "git pairmerge needs git 2.43 or later")
 class StreamingTest(unittest.TestCase):
     """Many clean pairs whose records together fit in one stdout buffer: without a flush per

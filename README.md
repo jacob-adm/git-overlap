@@ -65,7 +65,7 @@ run in the [example repository](https://github.com/jacob-adm/git-overlap/blob/ma
 
 ```sh
 git for-each-ref --format='%(refname:short)' refs/heads/agent/ |
-  git footprint main | git overlap | git pairmerge | cut -f1-3 | uniq
+  git footprint main | git overlap | git pairmerge --onto main | cut -f1-3 | uniq
 ```
 
 ```text
@@ -75,15 +75,17 @@ agent/a	agent/d	conflict
 agent/b	agent/c	conflict
 agent/b	agent/d	conflict
 agent/c	agent/d	conflict
-agent/f	agent/g	conflict
+agent/f	agent/g	stale
 ```
 
-Each line is a pair of branches that conflict when merged with each other. Drop
+Each line is a pair of branches that conflict when both land on `main`, one after the other. Drop
 `| cut -f1-3 | uniq` to see the conflicted files. `agent/e` shares no file with any other
 branch, so `git overlap` passes on no pair that includes it and `git pairmerge` never merges it.
-`agent/f` no longer merges into `main`, which is why it conflicts with `agent/g`; the
+`agent/f` no longer merges into `main`, so its pair is `stale`, not a conflict; the
 [Stale branches](https://github.com/jacob-adm/git-overlap/blob/main/docs/recipes.md#stale-branches-which-branches-no-longer-merge-into-the-base)
-recipe finds such branches, and the other recipes leave them out.
+recipe finds such branches. Without `--onto main`, each pair is merged at its own merge base,
+where `agent/f` and `agent/g` conflict because `agent/g` carries the change to `main` that
+`agent/f` conflicts with.
 
 ## Documentation
 

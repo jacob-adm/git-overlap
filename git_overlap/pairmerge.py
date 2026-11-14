@@ -1,10 +1,12 @@
 # SPDX-License-Identifier: Apache-2.0
-"""git pairmerge [--attributes FILE]: report whether merging each pair of refs conflicts.
+"""git pairmerge [--attributes FILE] [--onto BASE]: report whether each pair of refs conflicts.
 
 Reads records whose first two fields are refs and writes `refA TAB refB TAB clean TAB` or one
-`refA TAB refB TAB conflict TAB path` per conflicted path. Merges run in memory with
-`git merge-tree --write-tree`; every object git writes lands in a private temporary object
-directory, so the repository is never changed. SPEC: "git pairmerge" and "Merge mechanism".
+`refA TAB refB TAB conflict TAB path` per conflicted path. With --onto BASE a pair is merged as
+the two refs would land on BASE, first one then the other, and a ref that no longer merges into
+BASE makes its pairs `stale`. Merges run in memory with `git merge-tree --write-tree`; every
+object git writes lands in a private temporary object directory, so the repository is never
+changed. SPEC: "git pairmerge", "--onto BASE" and "Merge mechanism".
 """
 
 import os
@@ -20,13 +22,16 @@ from ._common import (EXIT_FOUND, EXIT_NOTHING, OID, Fail, check_safe, git, git_
                       write_stderr_line, write_stdout)
 
 NAME = "pairmerge"
-USAGE = """usage: git pairmerge [-z] [--attributes FILE] < pairs
+USAGE = """usage: git pairmerge [-z] [--attributes FILE] [--onto BASE] < pairs
 
 For each pair of refs (the first two fields of each record), merge them in memory:
   refA TAB refB TAB clean TAB             (the pair merges cleanly)
   refA TAB refB TAB conflict TAB path     (one record per conflicted path; exit 1)
+With --onto BASE, a pair whose refA or refB no longer merges into BASE is written as
+  refA TAB refB TAB stale TAB path        (one record per path conflicting with BASE; exit 1)
 
   --attributes FILE  merge as if FILE were the repository's .gitattributes (replacing it)
+  --onto BASE        merge each pair as both refs would land on BASE, refA first
   -z                 records end with NUL instead of LF, on input and output
   -h                 show this help
   --version          show the version
@@ -49,6 +54,14 @@ GIT_FLOOR = (2, 43)
 #                          1000, applies to diff only) needs no pin.
 PINNED_CONFIG = ("-c", "merge.renames=true", "-c", "merge.directoryRenames=conflict",
                  "-c", "merge.renameLimit=7000")
+
+# The landing commit M_R of --onto: fixed author, committer and dates, so its id (which git
+# embeds in PATH~<id> names) is the same on every run (SPEC "--onto BASE", Mechanism). The
+# .invalid domain (RFC 2606) can never be a real address.
+LANDING_IDENTITY = {"GIT_AUTHOR_NAME": "git-overlap", "GIT_AUTHOR_EMAIL": "git-overlap@invalid",
+                    "GIT_AUTHOR_DATE": "@0 +0000", "GIT_COMMITTER_NAME": "git-overlap",
+                    "GIT_COMMITTER_EMAIL": "git-overlap@invalid",
+                    "GIT_COMMITTER_DATE": "@0 +0000"}
 
 
 def check_git_version():
@@ -294,10 +307,10 @@ def check_merge_base(sha_a, sha_b, env, ref_a, ref_b):
 
 
 def merge(tree, sha_a, sha_b, env, root, ref_a, ref_b):
-    """Merge two commits in memory; return None if clean, else the sorted conflicted paths.
+    """Merge two commits in memory; return the merged tree id and the conflicted paths.
 
     Clean/conflict is decided by the exit code and the tree id, never by git's messages. A
-    conflict with no listed paths returns [b""], written as one record with an empty path.
+    conflict with no listed paths gives [b""], written as one record with an empty path.
 
     Args:
         tree: The attribute-source tree id (bytes).
@@ -309,7 +322,8 @@ def merge(tree, sha_a, sha_b, env, root, ref_a, ref_b):
         ref_b: The second ref as written, for messages.
 
     Returns:
-        None if the pair merges cleanly, else a sorted list of conflicted paths (bytes).
+        A tuple (tree id, paths): paths is None if the pair merges cleanly, else a sorted list
+        of conflicted paths (bytes). The tree id is merge-tree's first field, as bytes.
 
     Raises:
         Fail: merge-tree exits with anything but a clean result or a conflict.
@@ -321,16 +335,101 @@ def merge(tree, sha_a, sha_b, env, root, ref_a, ref_b):
                          ["--attr-source=" + os.fsdecode(tree), "merge-tree", "--write-tree",
                           "-z", "--name-only", "--no-messages", "--end-of-options",
                           sha_a, sha_b], env, cwd=root)
-    if code == 0:
-        return None
-    # Output is "TREE NUL PATH NUL PATH NUL ..."; a conflict needs a real tree id first.
+    # Output is "TREE NUL PATH NUL PATH NUL ..."; a clean merge prints the tree alone.
     fields = out.split(b"\0")
+    if code == 0:
+        return fields[0], None
+    # A conflict needs a real tree id first.
     if code == 1 and OID.match(fields[0]):
         # set(): never write one path twice, whatever git lists; sorted() is bytewise.
         paths = sorted(set(path for path in fields[1:] if path != b""))
-        return paths or [b""]
+        return fields[0], paths or [b""]
     raise Fail("git merge-tree failed for %s and %s: %s"
                % (show(ref_a), show(ref_b), git_error(err, code)))
+
+
+def land(tree, base, sha, env, root, onto, ref):
+    """Merge one ref onto BASE on its own; return its landing commit, or its stale paths.
+
+    A clean merge's tree becomes the commit M_R = commit-tree TREE -p BASE -p R, the merge
+    commit landing R would create, written to the private object directory with a fixed
+    identity, date, encoding and no signature, so its id is the same on every run.
+
+    Args:
+        tree: The attribute-source tree id (bytes).
+        base: BASE's commit id (bytes).
+        sha: The ref's commit id (bytes).
+        env: The private object environment.
+        root: The repository root, where merge-tree runs.
+        onto: BASE as the caller wrote it, for messages.
+        ref: The ref as written, for messages.
+
+    Returns:
+        A tuple (M_R id, None) if the ref merges cleanly into BASE, else (None, paths), the
+        sorted paths on which it conflicts with BASE ([b""] if git lists none).
+
+    Raises:
+        Fail: No merge base with BASE, or merge-tree or commit-tree fails.
+
+    SPEC: "--onto BASE" (Stale refs, Mechanism).
+    """
+    check_merge_base(base, sha, env, onto, ref)
+    merged, paths = merge(tree, base, sha, env, root, onto, ref)
+    if paths is not None:
+        return None, paths
+    # i18n.commitEncoding and --no-gpg-sign pinned: user configuration cannot change the id.
+    code, out, err = git(["-c", "i18n.commitEncoding=UTF-8", "commit-tree", "--no-gpg-sign",
+                          merged, "-p", base, "-p", sha, "-m", "pairmerge onto"],
+                         dict(env, **LANDING_IDENTITY))
+    commit = out.strip()
+    if code != 0 or not OID.match(commit):
+        raise Fail("git commit-tree failed for %s onto %s: %s"
+                   % (show(ref), show(onto), git_error(err, code)))
+    return commit, None
+
+
+def merge_onto(tree, base, landed, sha_a, sha_b, env, root, onto, ref_a, ref_b):
+    """Merge a pair as it would land on BASE, refA first; return (status, paths).
+
+    Each distinct commit is landed once (cached in `landed`, keyed by commit id) and reused
+    across pairs. If either side is stale the pair is stale, with the union of the stale
+    side(s)' paths; otherwise the pair is merge-tree M_A B, with git's own merge base.
+
+    Args:
+        tree: The attribute-source tree id (bytes).
+        base: BASE's commit id (bytes).
+        landed: The cache {commit id: land() result}, filled as refs are first used.
+        sha_a: The first ref's commit id (bytes), which lands first.
+        sha_b: The second ref's commit id (bytes).
+        env: The private object environment.
+        root: The repository root, where merge-tree runs.
+        onto: BASE as the caller wrote it, for messages.
+        ref_a: The first ref as written, for messages.
+        ref_b: The second ref as written, for messages.
+
+    Returns:
+        A tuple (status, paths): (b"clean", None), or b"conflict" or b"stale" with a sorted
+        list of paths ([b""] if there are none to list).
+
+    Raises:
+        Fail: A merge-tree, merge-base or commit-tree call fails.
+
+    SPEC: "--onto BASE" (Output per pair, Mechanism, Order).
+    """
+    for sha, ref in ((sha_a, ref_a), (sha_b, ref_b)):
+        if sha not in landed:
+            landed[sha] = land(tree, base, sha, env, root, onto, ref)
+    # The paths of each stale side (a side that landed has None there).
+    stale_sides = [landed[sha][1] for sha in (sha_a, sha_b) if landed[sha][1] is not None]
+    if stale_sides:
+        # b"" marks "git listed no path"; it is not a path, so it joins no union.
+        union = set(path for paths in stale_sides for path in paths if path != b"")
+        return b"stale", sorted(union) or [b""]
+    # No merge-base check: M_A has BASE as a parent, and B merged with BASE, so they share one.
+    _, paths = merge(tree, landed[sha_a][0], sha_b, env, root, ref_a, ref_b)
+    if paths is None:
+        return b"clean", None
+    return b"conflict", paths
 
 
 def remove_tree(path):
@@ -364,16 +463,17 @@ def pairmerge(argv):
         argv: The arguments, without the program name.
 
     Returns:
-        EXIT_FOUND if any pair conflicts, else EXIT_NOTHING.
+        EXIT_FOUND if any pair conflicts (or, with --onto, is stale), else EXIT_NOTHING.
 
     Raises:
-        Fail: A usage error, git too old, an unreadable FILE, a malformed record, an unknown
-            ref, no merge base, or a merge-tree failure.
+        Fail: A usage error, git too old, an unreadable FILE, an unknown BASE, a malformed
+            record, an unknown ref, no merge base, or a merge-tree or commit-tree failure.
         Interrupted: SIGINT, SIGTERM or SIGHUP arrived (after the cleanup ran).
 
-    SPEC: "git pairmerge" and "Merge mechanism".
+    SPEC: "git pairmerge", "--onto BASE" and "Merge mechanism".
     """
-    opts, positionals = parse_args(argv, ("-z", "-h", "--version"), ("--attributes",))
+    opts, positionals = parse_args(argv, ("-z", "-h", "--version"),
+                                   ("--attributes", "--onto"))
     if usage_and_version(opts, NAME, USAGE):
         return EXIT_NOTHING
     if positionals:
@@ -390,6 +490,14 @@ def pairmerge(argv):
                 attributes = handle.read()
         except OSError as exc:
             raise Fail("cannot read --attributes file: %s" % exc)
+    onto = opts.get("--onto")
+    base = None
+    if onto is not None:
+        # Both spellings, "--onto ''" and "--onto=", reach this usage error.
+        if onto == "":
+            raise Fail("--onto needs a non-empty BASE (see -h)")
+        # BASE is resolved before stdin is read, as every command's BASE is.
+        base = resolve(onto)
     pairs = read_pairs(zero)
     # Before any git call that may run elsewhere: relative paths from the caller must not
     # change meaning when merge-tree runs at the repository root.
@@ -411,6 +519,8 @@ def pairmerge(argv):
                         raise Fail("record %d: %s" % (number, exc))
         tree = attribute_tree(attributes, env)
         seen = set()
+        # --onto only: each distinct commit's land() result, computed once for the whole run.
+        landed = {}
         found = False
         for number, ref_a, ref_b in pairs:
             # A pair is the same in either order: process it once, at its first occurrence.
@@ -419,15 +529,20 @@ def pairmerge(argv):
                 continue
             seen.add(key)
             try:
-                check_merge_base(shas[ref_a], shas[ref_b], env, ref_a, ref_b)
-                paths = merge(tree, shas[ref_a], shas[ref_b], env, root, ref_a, ref_b)
+                if base is None:
+                    check_merge_base(shas[ref_a], shas[ref_b], env, ref_a, ref_b)
+                    _, paths = merge(tree, shas[ref_a], shas[ref_b], env, root, ref_a, ref_b)
+                    status = b"clean" if paths is None else b"conflict"
+                else:
+                    status, paths = merge_onto(tree, base, landed, shas[ref_a], shas[ref_b],
+                                               env, root, onto, ref_a, ref_b)
                 if paths is None:
                     write_record((ref_a, ref_b, b"clean", b""), zero)
                 else:
                     found = True
                     for path in paths:
                         check_safe(path, zero, "path")
-                        write_record((ref_a, ref_b, b"conflict", path), zero)
+                        write_record((ref_a, ref_b, status, path), zero)
                 # Hand each finished pair to the reader now: a long run shows progress, and a
                 # run that is stopped keeps every pair it completed (SPEC "Output timing").
                 write_stdout(None)
