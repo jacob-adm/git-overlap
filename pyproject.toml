@@ -7,9 +7,25 @@ build-backend = "setuptools.build_meta"
 name = "git-overlap"
 version = "0.1.0"
 description = "Unix-style git subcommands: which files each ref changes, and which refs overlap."
+readme = "README.md"
 requires-python = ">=3.8"
 license = {text = "Apache-2.0"}
 dependencies = []
+keywords = ["git", "merge", "merge-conflict", "pull-request", "continuous-integration", "cli"]
+classifiers = [
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Topic :: Software Development :: Version Control :: Git",
+]
+
+[project.urls]
+Homepage = "https://github.com/jacob-adm/git-overlap"
+Documentation = "https://github.com/jacob-adm/git-overlap/tree/main/docs"
+Source = "https://github.com/jacob-adm/git-overlap"
+Issues = "https://github.com/jacob-adm/git-overlap/issues"
 
 [project.scripts]
 git-footprint = "git_overlap.footprint:main"
