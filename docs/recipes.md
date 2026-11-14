@@ -12,6 +12,23 @@ pipeline, not a separate program: the three commands combined with plain POSIX `
 [example repository](commands.md#example-repository); the test suite runs every block below
 there and checks its exact output.
 
+## Stale branches: which branches no longer merge into the base?
+
+Each agent branch merged with `main`; a branch listed here conflicts with `main` on the file
+shown and must be rebased or fixed before it can land.
+
+```sh
+git for-each-ref --format='%(refname:short)' refs/heads/agent/ |
+  awk '{ print "main\t" $0 }' | git pairmerge |
+  awk -F '\t' '$3 == "conflict" { print $2 "\t" $4 }'
+```
+
+The recipes from Real conflicts on check fresh branches only: the branches that still merge
+cleanly into `main`, selected by the first two lines of each. `git pairmerge` merges a pair at
+the pair's own merge base, so a stale branch also conflicts with every newer branch that carries
+the change to `main` it conflicts with, even where the two branches' own edits do not collide.
+Counting those pairs would report staleness as collisions between branches.
+
 ## Footprint: which files does each branch change?
 
 The files each agent branch changes, compared with its merge base with `main`.
@@ -31,19 +48,22 @@ git for-each-ref --format='%(refname:short)' refs/heads/agent/ |
 
 ## Real conflicts: which pairs conflict, and on which files?
 
-Which overlapping pairs conflict when merged with each other, and on which files.
+Which overlapping pairs of fresh branches conflict when merged with each other, and on which
+files.
 
 ```sh
 git for-each-ref --format='%(refname:short)' refs/heads/agent/ |
+  awk '{ print "main\t" $0 }' | git pairmerge | awk -F '\t' '$3 == "clean" { print $2 }' |
   git footprint main | git overlap | git pairmerge
 ```
 
 ## Hotspots: which files conflict most?
 
-Conflicted files, ranked by the number of branch pairs that conflict on them.
+Conflicted files, ranked by the number of pairs of fresh branches that conflict on them.
 
 ```sh
 git for-each-ref --format='%(refname:short)' refs/heads/agent/ |
+  awk '{ print "main\t" $0 }' | git pairmerge | awk -F '\t' '$3 == "clean" { print $2 }' |
   git footprint main | git overlap | git pairmerge |
   awk -F '\t' '$3 == "conflict" { print $4 }' |
   LC_ALL=C sort | uniq -c | LC_ALL=C sort -k1,1nr -k2 |
@@ -52,13 +72,14 @@ git for-each-ref --format='%(refname:short)' refs/heads/agent/ |
 
 ## Measured p: what fraction of branch pairs conflicts?
 
-p = conflicting pairs / all pairs. The denominator counts every unordered pair of distinct
-branches, n(n-1)/2 for n branches, whether or not they overlap. Each pair is merged with the
-other at their own merge base (not with `main`) and counts as conflicting if git reports any
-conflict.
+p = conflicting pairs / all pairs of fresh branches. The denominator counts every unordered pair
+of distinct fresh branches, n(n-1)/2 for n branches, whether or not they overlap. Each pair is
+merged with the other at their own merge base (not with `main`) and counts as conflicting if git
+reports any conflict.
 
 ```sh
 git for-each-ref --format='%(refname:short)' refs/heads/agent/ |
+  awk '{ print "main\t" $0 }' | git pairmerge | awk -F '\t' '$3 == "clean" { print $2 }' |
   awk '{ r[NR] = $0 }
     END { for (i = 1; i <= NR; i++) for (j = i + 1; j <= NR; j++) print r[i] "\t" r[j] }' |
   git pairmerge |
@@ -69,8 +90,8 @@ git for-each-ref --format='%(refname:short)' refs/heads/agent/ |
 
 ## What-if merge drivers: which conflicts would a union merge remove?
 
-The same pairs as Real conflicts, merged as if `.gitattributes` marked the set and the log
-`merge=union` (nothing is committed). A union merge keeps both sides' lines. That is safe for a
+The same pairs of fresh branches as Real conflicts, merged as if `.gitattributes` marked the
+set and the log `merge=union` (nothing is committed). A union merge keeps both sides' lines. That is safe for a
 file with one entry per line, but it can make other files wrong (for example a list entry
 without its trailing comma), so the tests still decide correctness.
 
@@ -78,6 +99,7 @@ without its trailing comma), so the tests still decide correctness.
 attrs=$(mktemp)
 printf '%s\n' 'tools/registry.py merge=union' 'CHANGELOG.md merge=union' > "$attrs"
 git for-each-ref --format='%(refname:short)' refs/heads/agent/ |
+  awk '{ print "main\t" $0 }' | git pairmerge | awk -F '\t' '$3 == "clean" { print $2 }' |
   git footprint main | git overlap | git pairmerge --attributes "$attrs"
 rm -f "$attrs"
 ```
@@ -91,6 +113,7 @@ a pattern list. With the union attributes as well, what is left needs a person.
 attrs=$(mktemp)
 printf '%s\n' 'tools/registry.py merge=union' 'CHANGELOG.md merge=union' > "$attrs"
 git for-each-ref --format='%(refname:short)' refs/heads/agent/ |
+  awk '{ print "main\t" $0 }' | git pairmerge | awk -F '\t' '$3 == "clean" { print $2 }' |
   git footprint main | git overlap | git pairmerge --attributes "$attrs" |
   awk -F '\t' '$3 == "conflict"' | grep -v -e 'openapi\.json$' -e '_pb2\.py$'
 rm -f "$attrs"

@@ -31,7 +31,9 @@ can still break; see [Using it with other tools](other-tools.md).
 ## Example repository
 
 Every example in these pages runs in one repository, which the test suite builds: a `main`
-branch and five branches cut from it, `agent/a` to `agent/e`. The shared files are one of each
+branch and seven branches, `agent/a` to `agent/g`. All but `agent/g` are cut from the first
+commit of `main`; `main` then changes `src/config.py`, and `agent/g` is cut from that later
+commit. The shared files are one of each
 typed-path kind: `tools/registry.py` is a set (one entry per line, order irrelevant),
 `CHANGELOG.md` a log, `openapi.json` derived (generated) and `migrations/` a sequence (numbered
 files).
@@ -43,8 +45,10 @@ files).
 | `agent/c` | registry, changelog; adds `migrations/0002_users.sql` |
 | `agent/d` | changelog, `openapi.json`; adds `migrations/0002_orders.sql` |
 | `agent/e` | adds `docs/guide.md` only |
+| `agent/f` | the `DEBUG` line of `src/config.py`, which `main` later changes too: stale |
+| `agent/g` | the `LOG` line of `src/config.py` |
 
-Branches that share a file edit the same lines of it. One more branch, `odd`, outside
+Among `agent/a` to `agent/d`, branches that share a file edit the same lines of it. One more branch, `odd`, outside
 `refs/heads/agent/`, adds a file whose name contains a TAB; it is used only in the `-z` example.
 Beside the repository, `../snapshots/2026-11-13.bundle` is a snapshot bundle in pr-merge-audit's
 layout, used only in [Using it with other tools](other-tools.md).
