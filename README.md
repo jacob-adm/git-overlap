@@ -56,6 +56,26 @@ Use `-h` for usage: `git footprint --help` is answered by git itself, which look
 page. Without installing, each command also runs from a clone as
 `python3 -m git_overlap.footprint` (and `.overlap`, `.pairmerge`).
 
+## How it works
+
+1. **List the branches.** Pipe the branch names in, one per line, for example from
+   `git for-each-ref`. Each command reads tab-separated lines and writes tab-separated lines, so
+   the output of one is the input of the next.
+2. **`git footprint BASE`: what each branch changes.** For each branch it lists every file the
+   branch changes since it left BASE, the same list a pull request's "files changed" shows. A
+   rename counts as deleting the old path and adding the new one.
+3. **`git overlap`: which branches touch the same files.** It pairs every two branches that
+   change the same file, or a file and a path under it (`foo` and `foo/bar`). It only reads its
+   input and runs no git. A pair listed here may still merge cleanly.
+4. **`git pairmerge`: which pairs really conflict.** For each pair it runs the merge in memory
+   with `git merge-tree --write-tree` and prints `clean`, or `conflict` with each conflicted file.
+   Nothing is checked out and nothing is written to the repository. With `--onto BASE`, it asks
+   whether the two would conflict if both landed on BASE, one after the other, and marks a branch
+   that no longer merges into BASE as `stale`.
+5. **Act on the result.** Like `grep` and `diff`, `git overlap` and `git pairmerge` exit 1 when
+   they find something, 0 when they find nothing and 2 on an error, so a script or CI job can
+   stop on it. Batch, reorder or fix the conflicting branches before merging them.
+
 ## Quick start
 
 Inside the repository to check, list its branches one per line and pipe them through the three
