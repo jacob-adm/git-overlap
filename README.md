@@ -49,7 +49,7 @@ git footprint --version
 ```
 
 ```text
-git-footprint 0.3.1
+git-footprint 0.3.2
 ```
 
 Use `-h` for usage: `git footprint --help` is answered by git itself, which looks for a manual
