@@ -26,10 +26,10 @@ git-overlap was inspired by Xuchen Yao's article
 
 ## Install
 
-From a release tag:
+From PyPI:
 
 ```
-pip install git+https://github.com/jacob-adm/git-overlap@v0.3.1
+pip install git-overlap
 ```
 
 From a clone:
