@@ -26,6 +26,17 @@ jobs:
           python -m pip install .
           git footprint -h
 
+  # An older git than the hosted runners carry (Debian 12 ships 2.39): footprint and
+  # overlap must pass on it, and the pairmerge tests, which need git 2.43, must skip.
+  old-git:
+    runs-on: ubuntu-22.04
+    container: python:3.9-slim-bookworm
+    steps:
+      - run: apt-get update && apt-get install -y --no-install-recommends git
+      - run: git --version
+      - uses: actions/checkout@v4
+      - run: python -m unittest discover -s tests -v
+
   # The package PyPI would receive: built and checked on every change, not only at release.
   package:
     runs-on: ubuntu-22.04
