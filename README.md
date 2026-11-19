@@ -119,8 +119,8 @@ is always the raw bytes.
   and timings.
 - [Limitations and security](https://github.com/jacob-adm/git-overlap/blob/main/docs/limitations-and-security.md): what the commands miss, read
   and write.
-- [Using it with other tools](https://github.com/jacob-adm/git-overlap/blob/main/docs/other-tools.md): pr-merge-audit, line-oriented tools and
-  bug-age.
+- [Using it with other tools](https://github.com/jacob-adm/git-overlap/blob/main/docs/other-tools.md): tested stacks with git surface, trust-path
+  and pr-merge-audit, line-oriented tools and bug-age.
 - [Relation to the article](https://github.com/jacob-adm/git-overlap/blob/main/docs/article.md): what the article finds and which parts are
   covered.
 - [SPEC.md](https://github.com/jacob-adm/git-overlap/blob/main/SPEC.md): the full reference: every option, record format, error and edge case.
