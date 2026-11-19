@@ -1,0 +1,7 @@
+# SPDX-License-Identifier: Apache-2.0
+# The tests read the docs, the spec and the use-case script; ship them so the sdist can run them.
+include SPEC.md
+graft docs
+graft scripts
+graft tests
+global-exclude *.py[cod] __pycache__
