@@ -7,7 +7,7 @@ and runs footprint -> overlap -> pairmerge as black boxes; nothing is mocked.
 import unittest
 
 # Imported as a top-level module: unittest discovery puts tests/ on sys.path.
-from fixtures import Repo, Sandbox
+from fixtures import Repo, Sandbox, needs_pairmerge_git
 
 
 class DirCollisionCase(unittest.TestCase):
@@ -84,6 +84,7 @@ class TestPipeline(DirCollisionCase):
     SPEC: "git footprint", "git overlap" and "git pairmerge".
     """
 
+    @needs_pairmerge_git
     def test_file_versus_directory_reaches_pairmerge(self):
         """`flat` adds file `dir`, `nested` adds `dir/child`: pairmerge reports the conflict."""
         repo = Repo(self.sb)

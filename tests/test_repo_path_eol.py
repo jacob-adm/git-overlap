@@ -8,7 +8,7 @@ import os
 import unittest
 
 # Imported as a top-level module: unittest discovery puts tests/ on sys.path.
-from fixtures import Repo, Sandbox
+from fixtures import Repo, Sandbox, needs_pairmerge_git
 
 # Endings git may print back as part of the path; each must survive exactly.
 EOL_NAMES = ["repo\n", "repo\r", "repo\r\n", "repo\n\n", "repo\r\r"]
@@ -16,6 +16,7 @@ EOL_NAMES = ["repo\n", "repo\r", "repo\r\n", "repo\n\n", "repo\r\r"]
 OTHER_NAMES = ["re po", "re\tpo", 're"po', "re'po"]
 
 
+@needs_pairmerge_git
 @unittest.skipIf(os.name == "nt", "Windows cannot hold CR, LF, TAB or quotes in a name")
 class TestRepositoryPathEndings(unittest.TestCase):
     """Each directory name gets a clean pair and a conflicting pair, and nothing is written."""
