@@ -107,7 +107,7 @@ def docstring_lines(tree):
         if isinstance(node, _DOCUMENTED) and node.body:
             first = node.body[0]
             # A docstring is a bare string constant as the first statement (PEP 257).
-            # ast.Constant and end_lineno both exist from Python 3.8, the floor.
+            # ast.Constant and end_lineno both exist on every supported Python.
             if (isinstance(first, ast.Expr) and isinstance(first.value, ast.Constant)
                     and isinstance(first.value.value, str)):
                 lines.update(range(first.lineno, first.end_lineno + 1))

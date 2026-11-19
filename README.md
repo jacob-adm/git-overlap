@@ -17,7 +17,7 @@ git-overlap was inspired by Xuchen Yao's article
 
 ## Requirements and portability
 
-- Python 3.8 or later, standard library only.
+- Python 3.9 or later, standard library only.
 - git 2.38 or later. `git pairmerge` needs git 2.43 or later; on an older git it exits 2 with a
   message naming 2.43. git must be an executable named `git` on `PATH`.
 - Linux, macOS and Windows, all tested in CI.
