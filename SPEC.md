@@ -5,7 +5,7 @@ contract: the implementation and the tests are both written from it, separately.
 
 ## Common rules (all three commands)
 
-- Python 3.8 or later, standard library only. git 2.38 or later.
+- Python 3.9 or later, standard library only. git 2.38 or later.
 - Installed as console scripts `git-footprint`, `git-overlap`, `git-pairmerge`, so `git footprint`
   works on Linux, macOS and Windows. Also runnable as `python3 -m git_overlap.footprint` (etc.).
 - Runs in the repository of the current directory, like any git command. Never changes a ref, the
