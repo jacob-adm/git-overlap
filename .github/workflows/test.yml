@@ -30,7 +30,7 @@ jobs:
   # overlap must pass on it, and the pairmerge tests, which need git 2.43, must skip.
   old-git:
     runs-on: ubuntu-22.04
-    container: python:3.8-slim
+    container: python:3.9-slim-bookworm
     steps:
       - run: apt-get update && apt-get install -y --no-install-recommends git
       - run: git --version
