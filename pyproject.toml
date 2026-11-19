@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 [build-system]
-requires = ["setuptools>=61"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -9,7 +9,8 @@ version = "0.3.2"
 description = "Unix-style git subcommands: which files each ref changes, and which refs overlap."
 readme = "README.md"
 requires-python = ">=3.8"
-license = {text = "Apache-2.0"}
+license = "Apache-2.0"
+license-files = ["LICENSE"]
 dependencies = []
 keywords = ["git", "merge", "merge-conflict", "pull-request", "continuous-integration", "cli"]
 classifiers = [
