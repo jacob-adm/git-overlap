@@ -72,6 +72,9 @@ page. Without installing, each command also runs from a clone as
    Nothing is checked out and nothing is written to the repository. With `--onto BASE`, it asks
    whether the two would conflict if both landed on BASE, one after the other, and marks a branch
    that no longer merges into BASE as `stale`.
+   To include work that is not committed yet, name a worktree as `worktree:PATH` in place of a
+   branch: it stands for the files in that worktree as they are now. Nothing is written to the
+   repository to do this. See [Commands](https://github.com/jacob-adm/git-overlap/blob/main/docs/commands.md).
 5. **Act on the result.** Like `grep` and `diff`, `git overlap` and `git pairmerge` exit 1 when
    they find something, 0 when they find nothing and 2 on an error, so a script or CI job can
    stop on it. Batch, reorder or fix the conflicting branches before merging them.

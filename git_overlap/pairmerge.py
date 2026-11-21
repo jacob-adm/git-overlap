@@ -20,6 +20,7 @@ from ._common import (EXIT_FOUND, EXIT_NOTHING, OID, Fail, check_safe, git, git_
                       ignore_signals, install_signal_handlers, parse_args, read_records,
                       resolve, run, show, usage_and_version, write_record,
                       write_stderr_line, write_stdout)
+from ._worktree import resolve_any
 
 NAME = "pairmerge"
 USAGE = """usage: git pairmerge [-z] [--attributes FILE] [--onto BASE] < pairs
@@ -29,6 +30,7 @@ For each pair of refs (the first two fields of each record), merge them in memor
   refA TAB refB TAB conflict TAB path     (one record per conflicted path; exit 1)
 With --onto BASE, a pair whose refA or refB no longer merges into BASE is written as
   refA TAB refB TAB stale TAB path        (one record per path conflicting with BASE; exit 1)
+A ref written worktree:PATH is the worktree at PATH as it is now, uncommitted work included.
 
   --attributes FILE  merge as if FILE were the repository's .gitattributes (replacing it)
   --onto BASE        merge each pair as both refs would land on BASE, refA first
@@ -530,11 +532,12 @@ def pairmerge(argv):
         check_object_access(env)
         # Check every ref before any merge runs; a ref is resolved once however often used.
         shas = {}
+        counter = [0]
         for number, ref_a, ref_b in pairs:
             for ref in (ref_a, ref_b):
                 if ref not in shas:
                     try:
-                        shas[ref] = resolve(ref, env)
+                        shas[ref] = resolve_any(ref, env, tempdir, counter)
                     except Fail as exc:
                         raise Fail("record %d: %s" % (number, exc))
         tree = attribute_tree(attributes, env)

@@ -7,6 +7,9 @@
   one branch and a file added to the old directory on another share no path, yet can conflict.
   To catch that, give `git pairmerge` every pair, as the Measured p recipe does, not only the
   overlapping ones.
+- **Uncommitted work is seen only when asked for.** A branch name stands for its last commit.
+  To include what is edited but not committed, name the worktree as `worktree:PATH`. Ignored
+  files are never included, and a file an agent has not saved to disk cannot be seen at all.
 - **Case.** Paths and refs are compared bytewise and case-sensitively, as git's trees are.
   `Foo.txt` and `foo.txt` on two branches are not an overlap, although they collide on a
   case-insensitive file system. For the same reason `git pairmerge` can report such a pair
