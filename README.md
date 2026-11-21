@@ -60,7 +60,9 @@ page. Without installing, each command also runs from a clone as
 
 1. **List the branches.** Pipe the branch names in, one per line, for example from
    `git for-each-ref`. Each command reads tab-separated lines and writes tab-separated lines, so
-   the output of one is the input of the next.
+   the output of one is the input of the next. Add `--json` to the last command to get its
+   records as a JSON array instead, for a CI script or an agent; see
+   [JSON output](https://github.com/jacob-adm/git-overlap/blob/main/docs/commands.md#json-output).
 2. **`git footprint BASE`: what each branch changes.** For each branch it lists every file the
    branch changes since it left BASE, the same list a pull request's "files changed" shows. A
    rename counts as deleting the old path and adding the new one.

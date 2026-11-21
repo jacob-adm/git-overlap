@@ -173,7 +173,9 @@ refs/audit/pr/12	refs/audit/pr/15	tools/registry.py
 
 **Line-oriented tools.** Every record is one line (or one NUL-terminated record with `-z`) of
 TAB-separated fields, and the exit status follows `grep`: 0 nothing found, 1 found, 2 error. Any
-program that reads lines works on the output: `sort`, `awk`, a CI script, an agent's shell.
+program that reads lines works on the output: `sort`, `awk`, a CI script, an agent's shell. For
+a reader that wants JSON, `--json` on the last command of a pipeline writes the same records as a
+JSON array; see [JSON output](commands.md#json-output).
 
 **bug-age.** [bug-age](https://github.com/jacob-adm/bug-age) answers a different question: how
 long bugs that are already fixed lived in a repository's history. It shares no data with
