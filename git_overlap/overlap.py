@@ -10,16 +10,17 @@ import os
 import sys
 
 from ._common import (EXIT_FOUND, EXIT_NOTHING, Fail, check_safe, parse_args, read_records,
-                      run, show, usage_and_version, write_record)
+                      run, show, usage_and_version, Records)
 
 NAME = "overlap"
-USAGE = """usage: git overlap [-z] [--with REF] < footprint
+USAGE = """usage: git overlap [-z] [--json] [--with REF] < footprint
 
 Read git footprint records (ref TAB status TAB path) and report each pair of refs that
 touch the same path:
   refA TAB refB TAB path       (refA < refB bytewise; exit 1 if any, else 0)
 
   --with REF  only pairs that include REF
+  --json      write the pairs as a JSON array of objects (ref_a, ref_b, path)
   -z          records end with NUL instead of LF, on input and output
   -h          show this help
   --version   show the version"""
@@ -60,12 +61,14 @@ def overlap(argv):
 
     SPEC: "git overlap [--with REF]".
     """
-    opts, positionals = parse_args(argv, ("-z", "-h", "--version"), ("--with",))
+    opts, positionals = parse_args(argv, ("-z", "--json", "-h", "--version"), ("--with",))
     if usage_and_version(opts, NAME, USAGE):
         return EXIT_NOTHING
     if positionals:
         raise Fail("unexpected argument: %s (see -h)" % show(positionals[0]))
     zero = bool(opts.get("-z"))
+    as_json = bool(opts.get("--json"))
+    out = Records(("ref_a", "ref_b", "path"), zero, as_json)
     # The command line is text; os.fsencode gives back the bytes the caller typed.
     with_ref = os.fsencode(opts["--with"]) if "--with" in opts else None
     # An empty REF could never match a ref: it is a usage error, not "nothing found".
@@ -107,11 +110,12 @@ def overlap(argv):
     for pair in sorted(pairs):
         try:
             for field in pair:
-                check_safe(field, zero, "ref or path")
+                check_safe(field, zero or as_json, "ref or path")
         except Fail as exc:
             # Name the earliest input record behind this pair (SPEC "Record errors").
             raise Fail("record %d: %s" % (pairs[pair], exc))
-        write_record(pair, zero)
+        out.write(pair)
+    out.finish()
     return EXIT_FOUND if pairs else EXIT_NOTHING
 
 

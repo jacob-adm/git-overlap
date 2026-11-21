@@ -66,7 +66,7 @@ output, whatever the locale or time zone.
 
 ## git footprint BASE
 
-Synopsis: `git footprint [-z] BASE`.
+Synopsis: `git footprint [-z] [--json] BASE`.
 
 Reads one ref per record. For each ref, writes `ref TAB status TAB path` for every file the ref
 changes compared with its merge base with BASE: the files a pull request's "files changed" shows.
@@ -96,7 +96,7 @@ agent/d	M	openapi.json
 
 ## git overlap [--with REF]
 
-Synopsis: `git overlap [-z] [--with REF]`.
+Synopsis: `git overlap [-z] [--json] [--with REF]`.
 
 Reads footprint records and writes `refA TAB refB TAB path` for every path that two refs both
 change, with refA before refB bytewise, sorted by refA, refB, path.
@@ -134,7 +134,7 @@ agent/c	agent/d	CHANGELOG.md
 
 ## git pairmerge [--attributes FILE] [--onto BASE]
 
-Synopsis: `git pairmerge [-z] [--attributes FILE] [--onto BASE]`.
+Synopsis: `git pairmerge [-z] [--json] [--attributes FILE] [--onto BASE]`.
 
 Reads records whose first two fields are refs (further fields are ignored, so `git overlap`
 output pipes straight in) and merges each pair with each other, at the pair's own merge base,
@@ -268,6 +268,43 @@ printf 'odd\0' | git footprint -z main | tr '\0' '\n' | sed -n l
 ```text
 odd\tA\tnotes\tdraft.txt$
 ```
+
+## JSON output
+
+`--json` writes the same records, in the same order, as one JSON array of objects instead of
+TAB-separated records. It changes the output only: the input is still records, so put it on the
+last command of a pipeline.
+
+| Command | Keys |
+| --- | --- |
+| `git footprint` | `ref`, `status`, `path` |
+| `git overlap` | `ref_a`, `ref_b`, `path` |
+| `git pairmerge` | `ref_a`, `ref_b`, `result` (`clean`, `conflict` or `stale`), `path` (empty for `clean`) |
+
+The path with a TAB from the `-z` section above, which LF mode refuses, is written as JSON:
+
+```sh
+echo odd | git footprint --json main
+```
+
+```text
+[
+  {
+    "path": "notes\tdraft.txt",
+    "ref": "odd",
+    "status": "A"
+  }
+]
+```
+
+- Nothing found is `[]`. The exit status is the same as without `--json`.
+- The output is ASCII: control characters and characters outside ASCII are escaped, so it is
+  safe on a terminal. JSON escapes TAB, LF and CR, so a path that LF mode refuses is written.
+- A ref or path that is not valid UTF-8 keeps every byte: each byte that is not part of valid
+  UTF-8 is written as `\udc80` to `\udcff` (Python's `surrogateescape`). In Python,
+  `path.encode("utf-8", "surrogateescape")` gives back the original bytes.
+- The array is written after the last record. `git pairmerge --json` therefore shows no
+  progress, and a run that is stopped writes nothing. On exit 2 nothing is written.
 
 ## Exit status
 

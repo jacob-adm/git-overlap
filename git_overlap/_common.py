@@ -2,12 +2,13 @@
 """Shared plumbing for the git-overlap commands: records, arguments, errors and git.
 
 Everything that crosses a process boundary (stdin, stdout, git's output) is bytes. Nothing is
-decoded except to build a human-readable error message for stderr.
+decoded except to build a human-readable error message for stderr, and for --json output.
 
 SPEC: "Common rules (all three commands)".
 """
 
 import errno
+import json
 import os
 import re
 import signal
@@ -261,6 +262,35 @@ def write_record(fields, zero):
     if not zero and _stdout_is_terminal():
         fields = [for_terminal(field) for field in fields]
     write_stdout(b"\t".join(fields) + (b"\0" if zero else b"\n"))
+
+
+class Records(object):
+    """Write records TAB-separated as they come, or keep them for one JSON array (--json).
+
+    JSON escapes TAB, LF and CR, so callers check names with `check_safe(..., zero or as_json)`.
+    Bytes that are not UTF-8 are decoded with surrogateescape (\\udc80-\\udcff), so a reader
+    can recover every byte. The array is written by `finish`, after the last record.
+    """
+
+    def __init__(self, keys, zero, as_json):
+        """KEYS name the fields in order; ZERO is -z; AS_JSON is --json."""
+        self.keys = keys
+        self.zero = zero
+        self.as_json = as_json
+        self.rows = []
+
+    def write(self, fields):
+        """Write one record, or keep it for the array."""
+        if self.as_json:
+            self.rows.append(dict(zip(self.keys, (field.decode("utf-8", "surrogateescape")
+                                                  for field in fields))))
+        else:
+            write_record(fields, self.zero)
+
+    def finish(self):
+        """With --json, write the array (ASCII, one object per record) and a final LF."""
+        if self.as_json:
+            write_stdout(json.dumps(self.rows, indent=2, sort_keys=True).encode("ascii") + b"\n")
 
 
 # Asked once per process: whether stdout is a terminal cannot change while the command runs.

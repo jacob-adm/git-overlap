@@ -38,6 +38,17 @@ contract: the implementation and the tests are both written from it, separately.
   quoted in a message is escaped (backslash escapes for TAB, LF, CR, backslash and any byte that is
   not printable ASCII), so the message stays one line whatever the name holds. The line ends in LF
   on every platform (no CR LF on Windows).
+- **JSON output.** With `--json`, a command writes the same records, in the same order, as one
+  JSON array of objects followed by LF, instead of TAB-separated records; nothing found is `[]`.
+  Keys: `git footprint` `ref`, `status`, `path`; `git overlap` `ref_a`, `ref_b`, `path`;
+  `git pairmerge` `ref_a`, `ref_b`, `result` (`clean`, `conflict` or `stale`), `path` (empty for
+  `clean`). The output is ASCII (`json.dumps` defaults: control characters and non-ASCII
+  escaped), so it is safe on a terminal. A ref or path that is not valid UTF-8 is decoded with
+  `surrogateescape` (`\udc80` to `\udcff`), so every byte can be recovered. JSON escapes TAB, LF
+  and CR, so LF mode's unsafe-name error does not apply. `-z` still sets the input separator.
+  The array is written once the last record is known; on exit 2 nothing is written to stdout.
+  The exit status is the same as without `--json`. `--json` changes output only, so it belongs
+  on the last command of a pipeline.
 - **Unterminated last record.** A final record without its LF or NUL is accepted.
 - **Standard streams.** `-h` and `--version` print to stdout and exit 0, taking precedence over
   any other argument, except where `-h` is the value of an option that takes one (`--with -h`). If file descriptor 0 or 1 is not open at all (`<&-`, `>&-`), the command
