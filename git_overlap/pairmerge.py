@@ -18,12 +18,12 @@ import tempfile
 
 from ._common import (EXIT_FOUND, EXIT_NOTHING, OID, Fail, check_safe, git, git_error,
                       ignore_signals, install_signal_handlers, parse_args, read_records,
-                      resolve, run, show, usage_and_version, write_record,
+                      resolve, run, show, usage_and_version, Records,
                       write_stderr_line, write_stdout)
 from ._worktree import resolve_any
 
 NAME = "pairmerge"
-USAGE = """usage: git pairmerge [-z] [--attributes FILE] [--onto BASE] < pairs
+USAGE = """usage: git pairmerge [-z] [--json] [--attributes FILE] [--onto BASE] < pairs
 
 For each pair of refs (the first two fields of each record), merge them in memory:
   refA TAB refB TAB clean TAB             (the pair merges cleanly)
@@ -34,6 +34,8 @@ A ref written worktree:PATH is the worktree at PATH as it is now, uncommitted wo
 
   --attributes FILE  merge as if FILE were the repository's .gitattributes (replacing it)
   --onto BASE        merge each pair as both refs would land on BASE, refA first
+  --json             write the records as a JSON array of objects
+                     (ref_a, ref_b, result, path), once every pair is merged
   -z                 records end with NUL instead of LF, on input and output
   -h                 show this help
   --version          show the version
@@ -494,13 +496,15 @@ def pairmerge(argv):
 
     SPEC: "git pairmerge", "--onto BASE" and "Merge mechanism".
     """
-    opts, positionals = parse_args(argv, ("-z", "-h", "--version"),
+    opts, positionals = parse_args(argv, ("-z", "--json", "-h", "--version"),
                                    ("--attributes", "--onto"))
     if usage_and_version(opts, NAME, USAGE):
         return EXIT_NOTHING
     if positionals:
         raise Fail("unexpected argument: %s (see -h)" % show(positionals[0]))
     zero = bool(opts.get("-z"))
+    as_json = bool(opts.get("--json"))
+    out = Records(("ref_a", "ref_b", "result", "path"), zero, as_json)
     # From here on SIGINT/SIGTERM/SIGHUP unwind through the cleanup below (exit 128 + n).
     install_signal_handlers()
     check_git_version()
@@ -560,12 +564,12 @@ def pairmerge(argv):
                     status, paths = merge_onto(tree, base, landed, shas[ref_a], shas[ref_b],
                                                env, root, onto, ref_a, ref_b)
                 if paths is None:
-                    write_record((ref_a, ref_b, b"clean", b""), zero)
+                    out.write((ref_a, ref_b, b"clean", b""))
                 else:
                     found = True
                     for path in paths:
-                        check_safe(path, zero, "path")
-                        write_record((ref_a, ref_b, status, path), zero)
+                        check_safe(path, zero or as_json, "path")
+                        out.write((ref_a, ref_b, status, path))
                 # Hand each finished pair to the reader now: a long run shows progress, and a
                 # run that is stopped keeps every pair it completed (SPEC "Output timing").
                 write_stdout(None)
@@ -578,6 +582,7 @@ def pairmerge(argv):
         ignore_signals()
         if tempdir is not None:
             remove_tree(tempdir)
+    out.finish()
     return EXIT_FOUND if found else EXIT_NOTHING
 
 

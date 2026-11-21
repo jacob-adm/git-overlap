@@ -10,17 +10,18 @@ import tempfile
 
 from ._common import (EXIT_NOTHING, Fail, check_safe, git, git_error, ignore_signals,
                       install_signal_handlers, parse_args, read_records, resolve, run, show,
-                      usage_and_version, write_record)
+                      usage_and_version, Records)
 from ._worktree import is_worktree_ref, snapshot
 from .pairmerge import private_object_env, remove_tree, repository_layout
 
 NAME = "footprint"
-USAGE = """usage: git footprint [-z] BASE < refs
+USAGE = """usage: git footprint [-z] [--json] BASE < refs
 
 For each ref on stdin, list the files it changes compared with its merge base with BASE:
   ref TAB status TAB path      (status: A, M, D or T; renames are D + A)
 A ref written worktree:PATH is the worktree at PATH as it is now, uncommitted work included.
 
+  --json      write the records as a JSON array of objects (ref, status, path)
   -z          records end with NUL instead of LF, on input and output
   -h          show this help
   --version   show the version"""
@@ -108,12 +109,15 @@ def footprint(argv):
 
     SPEC: "git footprint BASE".
     """
-    opts, positionals = parse_args(argv, ("-z", "-h", "--version"), ())
+    opts, positionals = parse_args(argv, ("-z", "--json", "-h", "--version"), ())
     if usage_and_version(opts, NAME, USAGE):
         return EXIT_NOTHING
     if len(positionals) != 1:
         raise Fail("expected exactly one BASE argument (see -h)")
     zero = bool(opts.get("-z"))
+    as_json = bool(opts.get("--json"))
+    out = Records(("ref", "status", "path"), zero, as_json)
+    safe = zero or as_json
     # Resolve BASE before reading stdin, so a bad BASE fails even with no input.
     base_sha = resolve(positionals[0])
     # First pass: check and resolve every ref, so a bad one fails before any diff runs.
@@ -131,7 +135,7 @@ def footprint(argv):
             seen.add(ref)
             try:
                 # A record is the whole ref; in LF mode a TAB or CR in it cannot round-trip.
-                check_safe(ref, zero, "ref")
+                check_safe(ref, safe, "ref")
                 if is_worktree_ref(ref):
                     if tempdir is None:
                         objects, _ = repository_layout()
@@ -147,9 +151,9 @@ def footprint(argv):
             try:
                 mb = merge_base(base_sha, sha, ref, positionals[0], env)
                 for status, path in changed_files(mb, sha, env):
-                    check_safe(path, zero, "path")
+                    check_safe(path, safe, "path")
                     # The ref is printed exactly as the caller wrote it.
-                    write_record((ref, status, path), zero)
+                    out.write((ref, status, path))
             except Fail as exc:
                 # Errors about this ref name its record (SPEC "Record errors").
                 raise Fail("record %d: %s" % (number, exc))
@@ -158,6 +162,7 @@ def footprint(argv):
         ignore_signals()
         if tempdir is not None:
             remove_tree(tempdir)
+    out.finish()
     # A footprint is not a finding: success is always 0.
     return EXIT_NOTHING
 
