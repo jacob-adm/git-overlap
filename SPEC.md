@@ -215,6 +215,35 @@ landed on BASE, first one then the other? Without `--onto` the behaviour above i
   crashed with it until 2.43). The command reads `git version` and exits 2 with a message naming
   the floor if git is older. `git footprint` and `git overlap` keep the 2.38 floor.
 
+## Worktree refs
+
+`git footprint` and `git pairmerge` accept, wherever they read a ref from a record, the spelling
+`worktree:PATH`: the files of the worktree at PATH as they are now, committed or not.
+
+- PATH is the top directory of a worktree of the current repository (the main worktree or a
+  linked one), absolute or relative to the current directory. Anything else is exit 2 with
+  `not the top directory of a worktree of this repository: <ref>`: a missing path, a directory
+  that is not a worktree, a subdirectory of one, or a worktree of another repository.
+  `worktree:` with nothing after it is not a worktree ref; it resolves like any other ref.
+- The ref stands for a commit whose parent is the worktree's HEAD and whose tree is what
+  `git add -A` at PATH followed by a commit would record: changed and deleted tracked files, and
+  untracked files that are not ignored. Ignored files are left out. A worktree with nothing
+  uncommitted stands for its HEAD commit. A worktree with no commit checked out is exit 2 with
+  `worktree has no commit checked out: <ref>`.
+- **Nothing in the repository changes.** The commit and its objects are written to a private
+  temporary object directory, through a private copy of the worktree's index, and both are
+  removed before the command exits. No ref, index, worktree file or object of the repository is
+  created or changed. The commit's id is never printed.
+- The commit has a fixed author, committer and date, so the same files give the same result.
+- The ref is printed exactly as the caller wrote it, like any other ref, and sorts bytewise.
+- `git add` applies the repository's clean filters and line-ending settings, as a real commit
+  would. A configured filter is therefore run.
+- While `GIT_DIR`, `GIT_WORK_TREE` or `GIT_INDEX_FILE` is set, git run at PATH would read some
+  other repository, worktree or index, so a worktree ref is exit 2 with
+  `a worktree: ref cannot be used while <NAME> is set`.
+- BASE and `--onto BASE` take ordinary refs only.
+- `git overlap` reads and writes refs as text and needs no change: a worktree ref passes through.
+
 ## Recipes
 
 The recipes in [docs/recipes.md](docs/recipes.md) are part of the contract, as are the examples

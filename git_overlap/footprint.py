@@ -6,22 +6,27 @@ set of files a pull request's "files changed" tab shows. SPEC: "git footprint BA
 """
 
 import sys
+import tempfile
 
-from ._common import (EXIT_NOTHING, Fail, check_safe, git, git_error, parse_args,
-                      read_records, resolve, run, show, usage_and_version, write_record)
+from ._common import (EXIT_NOTHING, Fail, check_safe, git, git_error, ignore_signals,
+                      install_signal_handlers, parse_args, read_records, resolve, run, show,
+                      usage_and_version, write_record)
+from ._worktree import is_worktree_ref, snapshot
+from .pairmerge import private_object_env, remove_tree, repository_layout
 
 NAME = "footprint"
 USAGE = """usage: git footprint [-z] BASE < refs
 
 For each ref on stdin, list the files it changes compared with its merge base with BASE:
   ref TAB status TAB path      (status: A, M, D or T; renames are D + A)
+A ref written worktree:PATH is the worktree at PATH as it is now, uncommitted work included.
 
   -z          records end with NUL instead of LF, on input and output
   -h          show this help
   --version   show the version"""
 
 
-def merge_base(base_sha, sha, ref, base):
+def merge_base(base_sha, sha, ref, base, env=None):
     """Return the merge base of BASE and one ref.
 
     Args:
@@ -29,6 +34,7 @@ def merge_base(base_sha, sha, ref, base):
         sha: The ref's commit id (bytes).
         ref: The ref as the caller wrote it, for messages.
         base: BASE as the caller wrote it, for messages.
+        env: Environment variables for git (the private object directory), or None.
 
     Returns:
         The merge base commit id (bytes).
@@ -38,7 +44,7 @@ def merge_base(base_sha, sha, ref, base):
 
     SPEC: "Shallow or unrelated histories".
     """
-    code, out, err = git(["merge-base", base_sha, sha])
+    code, out, err = git(["merge-base", base_sha, sha], env)
     # merge-base exits 1 with no output when there is no common ancestor.
     if code == 1 and not out.strip():
         raise Fail("no merge base between %s and %s" % (show(base), show(ref)))
@@ -48,7 +54,7 @@ def merge_base(base_sha, sha, ref, base):
     return out.split(b"\n")[0].strip()
 
 
-def changed_files(mb, sha):
+def changed_files(mb, sha, env=None):
     """Return [(status, path)] of what `sha` changes relative to `mb`, sorted by path bytewise.
 
     Renames and copies are off, so a rename is D of the old path plus A of the new one.
@@ -59,6 +65,7 @@ def changed_files(mb, sha):
     Args:
         mb: The merge base commit id (bytes).
         sha: The ref's commit id (bytes).
+        env: Environment variables for git (the private object directory), or None.
 
     Returns:
         A list of (status, path) bytes tuples, sorted by path bytewise.
@@ -70,7 +77,8 @@ def changed_files(mb, sha):
     """
     # Each flag overrides a config setting that could otherwise change the file list.
     code, out, err = git(["diff", "--name-status", "-z", "--no-renames", "--no-ext-diff",
-                          "--no-textconv", "--no-relative", "--ignore-submodules=none", mb, sha])
+                          "--no-textconv", "--no-relative", "--ignore-submodules=none", mb, sha],
+                         env)
     if code != 0:
         raise Fail("git diff failed: %s" % git_error(err, code))
     # -z name-status output is "STATUS NUL PATH NUL" repeated; drop the final empty tail.
@@ -111,28 +119,45 @@ def footprint(argv):
     # First pass: check and resolve every ref, so a bad one fails before any diff runs.
     refs = []
     seen = set()
-    for number, ref in read_records(zero):
-        # A repeated ref (same spelling) is processed once, at its first occurrence.
-        if ref in seen:
-            continue
-        seen.add(ref)
-        try:
-            # A record is the whole ref; in LF mode a TAB or CR in it cannot round-trip.
-            check_safe(ref, zero, "ref")
-            refs.append((number, ref, resolve(ref)))
-        except Fail as exc:
-            raise Fail("record %d: %s" % (number, exc))
-    # Second pass: list each ref's files, refs in input order.
-    for number, ref, sha in refs:
-        try:
-            mb = merge_base(base_sha, sha, ref, positionals[0])
-            for status, path in changed_files(mb, sha):
-                check_safe(path, zero, "path")
-                # The ref is printed exactly as the caller wrote it.
-                write_record((ref, status, path), zero)
-        except Fail as exc:
-            # Errors about this ref name its record (SPEC "Record errors").
-            raise Fail("record %d: %s" % (number, exc))
+    # A worktree: ref is snapshotted into a private object directory, made on first use and
+    # removed on the way out, so the repository itself is never written to.
+    tempdir, env, counter = None, None, [0]
+    install_signal_handlers()
+    try:
+        for number, ref in read_records(zero):
+            # A repeated ref (same spelling) is processed once, at its first occurrence.
+            if ref in seen:
+                continue
+            seen.add(ref)
+            try:
+                # A record is the whole ref; in LF mode a TAB or CR in it cannot round-trip.
+                check_safe(ref, zero, "ref")
+                if is_worktree_ref(ref):
+                    if tempdir is None:
+                        objects, _ = repository_layout()
+                        tempdir = tempfile.mkdtemp(prefix="git-footprint-")
+                        env = private_object_env(tempdir, objects)
+                    refs.append((number, ref, snapshot(ref, env, tempdir, counter)))
+                else:
+                    refs.append((number, ref, resolve(ref)))
+            except Fail as exc:
+                raise Fail("record %d: %s" % (number, exc))
+        # Second pass: list each ref's files, refs in input order.
+        for number, ref, sha in refs:
+            try:
+                mb = merge_base(base_sha, sha, ref, positionals[0], env)
+                for status, path in changed_files(mb, sha, env):
+                    check_safe(path, zero, "path")
+                    # The ref is printed exactly as the caller wrote it.
+                    write_record((ref, status, path), zero)
+            except Fail as exc:
+                # Errors about this ref name its record (SPEC "Record errors").
+                raise Fail("record %d: %s" % (number, exc))
+    finally:
+        # Nothing may interrupt the removal of the private directory.
+        ignore_signals()
+        if tempdir is not None:
+            remove_tree(tempdir)
     # A footprint is not a finding: success is always 0.
     return EXIT_NOTHING
 

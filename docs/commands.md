@@ -223,6 +223,27 @@ agent/a	agent/b	conflict	src/app.py
 - Decides clean or conflict by git's exit status and never parses git's messages. A conflict for
   which git lists no path is written with an empty path field.
 
+## worktree:PATH refs
+
+A ref read from a record may be written `worktree:PATH`, where PATH is the top directory of a
+worktree of this repository. It stands for the files in that worktree as they are now: changed
+and deleted tracked files and untracked files that are not ignored, whether committed or not. A
+worktree with nothing uncommitted stands for its HEAD commit.
+
+`git footprint` then lists what the worktree changes, uncommitted work included, and
+`git pairmerge` merges it against another worktree or branch. `git overlap` passes the ref
+through like any other. So the usual pipeline, fed one `worktree:PATH` per worktree, shows where
+work in progress collides before anything is committed. `git worktree list --porcelain` prints
+the paths; each `worktree PATH` line becomes a `worktree:PATH` record.
+
+Nothing in the repository changes. The snapshot is built in a private temporary object
+directory, with a private copy of the worktree's index, and removed before the command exits.
+BASE and `--onto BASE` take ordinary refs only.
+
+A path that is not the top directory of a worktree of this repository is an error (exit 2), as
+is a worktree with no commit checked out. `git add` runs to build the snapshot, so configured
+clean filters and line-ending settings apply as they would for a commit.
+
 ## -z
 
 In LF mode, a path containing a TAB stops the command:
