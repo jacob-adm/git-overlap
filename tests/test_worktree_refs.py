@@ -9,6 +9,8 @@ import sys
 import tempfile
 import unittest
 
+from fixtures import PAIRMERGE_OK, needs_pairmerge_git
+
 # The project root, put on PYTHONPATH so `python -m git_overlap.footprint` finds the package.
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -101,6 +103,7 @@ class WorktreeRefs(unittest.TestCase):
         self.assertEqual(out, self.ref("a") + b"\tM\tf.txt\n" + self.ref("b") + b"\tM\tf.txt\n"
                          + self.ref("c") + b"\tA\tnew.txt\n")
 
+    @needs_pairmerge_git
     def test_pipeline_reports_the_conflict_between_uncommitted_edits(self):
         """footprint | overlap | pairmerge reports the two worktrees that change one line."""
         # Each command's output is the next one's input, as in the documented pipeline.
@@ -117,6 +120,7 @@ class WorktreeRefs(unittest.TestCase):
         code, out, _ = tool("footprint", self.repo, ["main"], b"agent-a\nagent-b\nagent-c\n")
         self.assertEqual((code, out), (0, b""))
 
+    @needs_pairmerge_git
     def test_a_worktree_ref_and_a_branch_can_be_paired(self):
         """An uncommitted edit conflicts with a committed one on another branch."""
         # b commits its edit; a's stays uncommitted.
@@ -125,6 +129,7 @@ class WorktreeRefs(unittest.TestCase):
         code, out, _ = tool("pairmerge", self.repo, [], pair)
         self.assertEqual((code, out), (1, self.ref("a") + b"\tagent-b\tconflict\tf.txt\n"))
 
+    @needs_pairmerge_git
     def test_edits_to_different_files_merge_cleanly(self):
         """Uncommitted edits that do not touch the same lines are reported clean."""
         # a edits f.txt, c adds new.txt.
@@ -146,10 +151,13 @@ class WorktreeRefs(unittest.TestCase):
         before = state(self.repo, self.paths)
         _, footprint, _ = tool("footprint", self.repo, ["main"], self.refs())
         _, pairs, _ = tool("overlap", self.repo, [], footprint)
-        tool("pairmerge", self.repo, [], pairs)
-        tool("pairmerge", self.repo, ["--onto", "main"], pairs)
+        # git pairmerge refuses git older than 2.43; footprint is still checked there.
+        if PAIRMERGE_OK:
+            tool("pairmerge", self.repo, [], pairs)
+            tool("pairmerge", self.repo, ["--onto", "main"], pairs)
         self.assertEqual(state(self.repo, self.paths), before)
 
+    @needs_pairmerge_git
     def test_onto_works_with_worktree_refs(self):
         """With --onto, both uncommitted edits land on main and the second conflicts."""
         # a lands first, then b no longer applies.
@@ -175,8 +183,11 @@ class WorktreeRefs(unittest.TestCase):
         for path in (os.path.join(self.tmp, "missing"), self.tmp, other,
                      os.path.join(self.wt["a"], "sub")):
             record = b"worktree:" + os.fsencode(path) + b"\n"
-            for name, args, data in (("footprint", ["main"], record),
-                                     ("pairmerge", [], record[:-1] + b"\tmain\n")):
+            commands = [("footprint", ["main"], record)]
+            # git pairmerge refuses git older than 2.43 before it reads any record.
+            if PAIRMERGE_OK:
+                commands.append(("pairmerge", [], record[:-1] + b"\tmain\n"))
+            for name, args, data in commands:
                 code, out, err = tool(name, self.repo, args, data)
                 self.assertEqual((code, out), (2, b""), path)
                 self.assertIn(b"record 1: not the top directory of a worktree of this repository: "
