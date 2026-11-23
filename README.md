@@ -15,7 +15,7 @@ git-overlap was inspired by Xuchen Yao's article
 (4 November 2026). It covers the measurement side the article calls for; see
 [Relation to the article](https://github.com/jacob-adm/git-overlap/blob/main/docs/article.md).
 
-## Requirements and portability
+## Requirements
 
 - Python 3.9 or later, standard library only.
 - git 2.38 or later. `git pairmerge` needs git 2.43 or later; on an older git it exits 2 with a
@@ -80,6 +80,19 @@ page. Without installing, each command also runs from a clone as
 5. **Act on the result.** Like `grep` and `diff`, `git overlap` and `git pairmerge` exit 1 when
    they find something, 0 when they find nothing and 2 on an error, so a script or CI job can
    stop on it. Batch, reorder or fix the conflicting branches before merging them.
+
+## Commands
+
+```
+git footprint [-z] [--json] BASE < refs
+git overlap [-z] [--json] [--with REF] < footprint
+git pairmerge [-z] [--json] [--attributes FILE] [--onto BASE] < pairs
+```
+
+Each command reads tab-separated records on standard input and writes them on standard output.
+`-z` uses NUL-terminated records and `--json` writes a JSON array. See
+[Commands](https://github.com/jacob-adm/git-overlap/blob/main/docs/commands.md) for the fields,
+`worktree:PATH` refs and exit status.
 
 ## Quick start
 
