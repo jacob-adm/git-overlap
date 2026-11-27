@@ -15,6 +15,10 @@ git-overlap was inspired by Xuchen Yao's article
 (4 November 2026). It covers the measurement side the article calls for; see
 [Relation to the article](https://github.com/jacob-adm/git-overlap/blob/main/docs/article.md).
 
+It is one of six audit tools that print the same result format with `--audit-json`.
+[suite-gate](https://github.com/jacob-adm/suite-gate) runs them together and gives one verdict per
+branch, as a command, a GitHub Action or an MCP server for coding agents.
+
 ## Example output
 
 A demo repository with two branches that both edit `app.py`:
