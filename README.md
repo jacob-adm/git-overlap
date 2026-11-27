@@ -15,6 +15,16 @@ git-overlap was inspired by Xuchen Yao's article
 (4 November 2026). It covers the measurement side the article calls for; see
 [Relation to the article](https://github.com/jacob-adm/git-overlap/blob/main/docs/article.md).
 
+## Example output
+
+A demo repository with two branches that both edit `app.py`:
+
+![git footprint piped to git overlap, reporting one shared file](https://raw.githubusercontent.com/jacob-adm/git-overlap/main/docs/screenshots/git-overlap.svg)
+
+The same pair with `--audit-json` (first lines of the result):
+
+![git overlap --audit-json output](https://raw.githubusercontent.com/jacob-adm/git-overlap/main/docs/screenshots/git-overlap-audit-json.svg)
+
 ## Requirements
 
 - Python 3.9 or later, standard library only.
