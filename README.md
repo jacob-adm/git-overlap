@@ -141,6 +141,7 @@ is always the raw bytes.
 
 ## Documentation
 
+- [For coding agents](https://github.com/jacob-adm/git-overlap/blob/main/docs/AGENTS.md): how an agent runs the git-overlap commands, reads `--audit-json` and cites the evidence.
 - [Commands](https://github.com/jacob-adm/git-overlap/blob/main/docs/commands.md): each command's input, output, options and exit status, with
   examples.
 - [Recipes](https://github.com/jacob-adm/git-overlap/blob/main/docs/recipes.md): pipelines that find hotspots, measure p and test merge drivers.
