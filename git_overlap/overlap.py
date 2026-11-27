@@ -9,11 +9,12 @@ SPEC: "git overlap [--with REF]".
 import os
 import sys
 
+from . import audit
 from ._common import (EXIT_FOUND, EXIT_NOTHING, Fail, check_safe, parse_args, read_records,
                       run, show, usage_and_version, Records)
 
 NAME = "overlap"
-USAGE = """usage: git overlap [-z] [--json] [--with REF] < footprint
+USAGE = """usage: git overlap [-z] [--json | --audit-json] [--with REF] < footprint
 
 Read git footprint records (ref TAB status TAB path) and report each pair of refs that
 touch the same path:
@@ -21,6 +22,9 @@ touch the same path:
 
   --with REF  only pairs that include REF
   --json      write the pairs as a JSON array of objects (ref_a, ref_b, path)
+  --audit-json
+              write one audit result object (format audit-result/1): each pair
+              with a rule, a severity, a message and its evidence
   -z          records end with NUL instead of LF, on input and output
   -h          show this help
   --version   show the version"""
@@ -48,7 +52,14 @@ def split_record(record):
 
 
 def overlap(argv):
-    """Run git overlap.
+    """Run git overlap; with --audit-json, write one audit result object instead."""
+    if "--audit-json" not in (argv[:argv.index("--")] if "--" in argv else argv):
+        return _overlap(argv, None)
+    return audit.run(NAME, lambda state: _overlap(argv, state))
+
+
+def _overlap(argv, state):
+    """Run git overlap. STATE is None, or a dict for audit.run (--audit-json).
 
     Args:
         argv: The arguments, without the program name.
@@ -61,14 +72,19 @@ def overlap(argv):
 
     SPEC: "git overlap [--with REF]".
     """
-    opts, positionals = parse_args(argv, ("-z", "--json", "-h", "--version"), ("--with",))
+    opts, positionals = parse_args(argv, ("-z", "--json", "--audit-json", "-h", "--version"),
+                                   ("--with",))
     if usage_and_version(opts, NAME, USAGE):
         return EXIT_NOTHING
     if positionals:
         raise Fail("unexpected argument: %s (see -h)" % show(positionals[0]))
     zero = bool(opts.get("-z"))
-    as_json = bool(opts.get("--json"))
+    if state is not None and opts.get("--json"):
+        raise Fail("--json and --audit-json cannot be used together")
+    as_json = bool(opts.get("--json")) or state is not None
     out = Records(("ref_a", "ref_b", "path"), zero, as_json)
+    if state is not None and "--with" in opts:
+        state["target"]["ref"] = opts["--with"]
     # The command line is text; os.fsencode gives back the bytes the caller typed.
     with_ref = os.fsencode(opts["--with"]) if "--with" in opts else None
     # An empty REF could never match a ref: it is a usage error, not "nothing found".
@@ -115,8 +131,11 @@ def overlap(argv):
             # Name the earliest input record behind this pair (SPEC "Record errors").
             raise Fail("record %d: %s" % (pairs[pair], exc))
         out.write(pair)
+    code = EXIT_FOUND if pairs else EXIT_NOTHING
+    if state is not None:
+        return code, [audit.overlap_finding(row, state["target"].get("ref")) for row in out.rows]
     out.finish()
-    return EXIT_FOUND if pairs else EXIT_NOTHING
+    return code
 
 
 def main():

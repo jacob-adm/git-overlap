@@ -96,7 +96,7 @@ agent/d	M	openapi.json
 
 ## git overlap [--with REF]
 
-Synopsis: `git overlap [-z] [--json] [--with REF]`.
+Synopsis: `git overlap [-z] [--json | --audit-json] [--with REF]`.
 
 Reads footprint records and writes `refA TAB refB TAB path` for every path that two refs both
 change, with refA before refB bytewise, sorted by refA, refB, path.
@@ -134,7 +134,7 @@ agent/c	agent/d	CHANGELOG.md
 
 ## git pairmerge [--attributes FILE] [--onto BASE]
 
-Synopsis: `git pairmerge [-z] [--json] [--attributes FILE] [--onto BASE]`.
+Synopsis: `git pairmerge [-z] [--json | --audit-json] [--attributes FILE] [--onto BASE]`.
 
 Reads records whose first two fields are refs (further fields are ignored, so `git overlap`
 output pipes straight in) and merges each pair with each other, at the pair's own merge base,
@@ -304,7 +304,94 @@ echo odd | git footprint --json main
   UTF-8 is written as `\udc80` to `\udcff` (Python's `surrogateescape`). In Python,
   `path.encode("utf-8", "surrogateescape")` gives back the original bytes.
 - The array is written after the last record. `git pairmerge --json` therefore shows no
-  progress, and a run that is stopped writes nothing. On exit 2 nothing is written.
+  progress, and a run that is stopped writes nothing. On exit 2 nothing is written; see
+  [Audit result output](#audit-result-output) for the one output that is written on an error.
+
+## Audit result output
+
+`git overlap --audit-json` and `git pairmerge --audit-json` write one JSON object in the audit
+result format (`audit-result/1`), for a CI job or an agent that runs several audit tools and
+reads their results the same way. Each record becomes a finding with what a reader needs to act
+on it: a rule id, a severity, one sentence and the evidence to check it. `git footprint` has no
+such output: its records are the input to the other two, not findings. In a repository directory
+named `demo` where `b1` and `b2` change the same line of `a.txt` and `b3` adds `c.txt`
+(`printf 'b1\tb2\nb1\tb3\n' | git pairmerge --audit-json`):
+
+```
+{
+  "errors": [],
+  "exit": 1,
+  "findings": [
+    {
+      "evidence": {
+        "path": "a.txt",
+        "ref": "b1"
+      },
+      "message": "b1 and b2 conflict in a.txt",
+      "record": {
+        "path": "a.txt",
+        "ref_a": "b1",
+        "ref_b": "b2",
+        "result": "conflict"
+      },
+      "rule": "git-overlap.pairmerge.conflict",
+      "severity": "high"
+    },
+    {
+      "evidence": {
+        "ref": "b1"
+      },
+      "message": "b1 and b3 merge cleanly",
+      "record": {
+        "path": "",
+        "ref_a": "b1",
+        "ref_b": "b3",
+        "result": "clean"
+      },
+      "rule": "git-overlap.pairmerge.clean",
+      "severity": "info"
+    }
+  ],
+  "format": "audit-result/1",
+  "target": {
+    "kind": "repository",
+    "name": "demo"
+  },
+  "tool": {
+    "name": "git-overlap",
+    "version": "0.7.0"
+  }
+}
+```
+
+| Key | Value |
+| --- | --- |
+| `format` | `audit-result/1`. |
+| `tool` | `git-overlap` and its version. |
+| `target` | `kind` `repository`; `name`, the name of the current directory (`git overlap` needs no repository); `ref`, REF of `--with`; `base`, BASE of `--onto`. |
+| `exit` | The exit status of the run, 0, 1 or 2. |
+| `findings` | One object per record, in the order of `--json`. |
+| `errors` | One object per error, with the `message` also written to standard error. |
+
+Each finding has:
+
+| Record | `rule` | `severity` | `message` |
+| --- | --- | --- | --- |
+| `git overlap` pair | `git-overlap.overlap` | `low` | `refA and refB both change PATH` |
+| `conflict` | `git-overlap.pairmerge.conflict` | `high` | `refA and refB conflict in PATH`, and with `--onto`, `when both land on BASE, refA first` |
+| `stale` | `git-overlap.pairmerge.stale` | `high` | `refA or refB no longer merges into BASE: conflict in PATH` |
+| `clean` | `git-overlap.pairmerge.clean` | `info` | `refA and refB merge cleanly`, with the same `--onto` words |
+
+The severity is fixed by the record, never by the files: two refs that change one file may still
+merge, while a conflict or a stale ref stops a merge. A `clean` record is `info`, so the exit
+status is the same as with the other outputs. `evidence` holds `path` (none for `clean`) and
+`ref`: REF of `--with` for `git overlap` when given, else refA. `record` is the `--json` record,
+unchanged.
+
+The object is written once the run ends, also on an error, so a reader always gets one object.
+On an error (a malformed record, an unknown ref, a usage error such as `--json` with
+`--audit-json`), `findings` is empty, `errors` holds the message and the exit status is 2. `-h`
+and `--version` print what they always print.
 
 ## Exit status
 
