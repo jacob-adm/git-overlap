@@ -16,6 +16,7 @@ import stat
 import sys
 import tempfile
 
+from . import audit
 from ._common import (EXIT_FOUND, EXIT_NOTHING, OID, Fail, check_safe, git, git_error,
                       ignore_signals, install_signal_handlers, parse_args, read_records,
                       resolve, run, show, usage_and_version, Records,
@@ -23,7 +24,7 @@ from ._common import (EXIT_FOUND, EXIT_NOTHING, OID, Fail, check_safe, git, git_
 from ._worktree import resolve_any
 
 NAME = "pairmerge"
-USAGE = """usage: git pairmerge [-z] [--json] [--attributes FILE] [--onto BASE] < pairs
+USAGE = """usage: git pairmerge [-z] [--json | --audit-json] [--attributes FILE] [--onto BASE] < pairs
 
 For each pair of refs (the first two fields of each record), merge them in memory:
   refA TAB refB TAB clean TAB             (the pair merges cleanly)
@@ -36,6 +37,8 @@ A ref written worktree:PATH is the worktree at PATH as it is now, uncommitted wo
   --onto BASE        merge each pair as both refs would land on BASE, refA first
   --json             write the records as a JSON array of objects
                      (ref_a, ref_b, result, path), once every pair is merged
+  --audit-json       write one audit result object (format audit-result/1): each
+                     record with a rule, a severity, a message and its evidence
   -z                 records end with NUL instead of LF, on input and output
   -h                 show this help
   --version          show the version
@@ -481,6 +484,13 @@ def remove_tree(path):
 
 
 def pairmerge(argv):
+    """Run git pairmerge; with --audit-json, write one audit result object instead."""
+    if "--audit-json" not in (argv[:argv.index("--")] if "--" in argv else argv):
+        return _pairmerge(argv, None)
+    return audit.run(NAME, lambda state: _pairmerge(argv, state))
+
+
+def _pairmerge(argv, state):
     """Run git pairmerge.
 
     Args:
@@ -496,15 +506,19 @@ def pairmerge(argv):
 
     SPEC: "git pairmerge", "--onto BASE" and "Merge mechanism".
     """
-    opts, positionals = parse_args(argv, ("-z", "--json", "-h", "--version"),
+    opts, positionals = parse_args(argv, ("-z", "--json", "--audit-json", "-h", "--version"),
                                    ("--attributes", "--onto"))
     if usage_and_version(opts, NAME, USAGE):
         return EXIT_NOTHING
     if positionals:
         raise Fail("unexpected argument: %s (see -h)" % show(positionals[0]))
     zero = bool(opts.get("-z"))
-    as_json = bool(opts.get("--json"))
+    if state is not None and opts.get("--json"):
+        raise Fail("--json and --audit-json cannot be used together")
+    as_json = bool(opts.get("--json")) or state is not None
     out = Records(("ref_a", "ref_b", "result", "path"), zero, as_json)
+    if state is not None and opts.get("--onto"):
+        state["target"]["base"] = opts["--onto"]
     # From here on SIGINT/SIGTERM/SIGHUP unwind through the cleanup below (exit 128 + n).
     install_signal_handlers()
     check_git_version()
@@ -582,8 +596,12 @@ def pairmerge(argv):
         ignore_signals()
         if tempdir is not None:
             remove_tree(tempdir)
+    code = EXIT_FOUND if found else EXIT_NOTHING
+    if state is not None:
+        onto = state["target"].get("base")
+        return code, [audit.pairmerge_finding(row, onto) for row in out.rows]
     out.finish()
-    return EXIT_FOUND if found else EXIT_NOTHING
+    return code
 
 
 def main():

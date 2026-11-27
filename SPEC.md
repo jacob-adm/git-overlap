@@ -49,6 +49,16 @@ contract: the implementation and the tests are both written from it, separately.
   The array is written once the last record is known; on exit 2 nothing is written to stdout.
   The exit status is the same as without `--json`. `--json` changes output only, so it belongs
   on the last command of a pipeline.
+- **Audit result output.** With `--audit-json`, `git overlap` and `git pairmerge` write one
+  JSON object in format `audit-result/1` followed by LF: `format`, `tool` (`git-overlap` and
+  the version), `target` (`kind` `repository`, `name` the current directory's name, `ref` from
+  `--with`, `base` from `--onto`), `exit`, `findings` and `errors`. Each record is a finding
+  with `rule`, `severity`, `message`, `evidence` (`path` unless empty, and `ref`) and `record`,
+  the `--json` object unchanged. Rules and severities are fixed: `git-overlap.overlap` low,
+  `git-overlap.pairmerge.conflict` and `.stale` high, `.clean` info. The exit status is the same
+  as without the flag. On exit 2 the object is still written, with no findings and the error in
+  `errors`, after the usual stderr line. `--json` with `--audit-json` is a usage error.
+  `git footprint` has no `--audit-json`. docs/commands.md shows an example.
 - **Unterminated last record.** A final record without its LF or NUL is accepted.
 - **Standard streams.** `-h` and `--version` print to stdout and exit 0, taking precedence over
   any other argument, except where `-h` is the value of an option that takes one (`--with -h`). If file descriptor 0 or 1 is not open at all (`<&-`, `>&-`), the command

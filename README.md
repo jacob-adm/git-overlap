@@ -85,12 +85,13 @@ page. Without installing, each command also runs from a clone as
 
 ```
 git footprint [-z] [--json] BASE < refs
-git overlap [-z] [--json] [--with REF] < footprint
-git pairmerge [-z] [--json] [--attributes FILE] [--onto BASE] < pairs
+git overlap [-z] [--json | --audit-json] [--with REF] < footprint
+git pairmerge [-z] [--json | --audit-json] [--attributes FILE] [--onto BASE] < pairs
 ```
 
 Each command reads tab-separated records on standard input and writes them on standard output.
-`-z` uses NUL-terminated records and `--json` writes a JSON array. See
+`-z` uses NUL-terminated records and `--json` writes a JSON array; `--audit-json` writes one
+object in the audit result format shared with other audit tools. See
 [Commands](https://github.com/jacob-adm/git-overlap/blob/main/docs/commands.md) for the fields,
 `worktree:PATH` refs and exit status.
 
