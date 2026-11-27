@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="834" height="561" viewBox="0 0 834 561" role="img" aria-label="git-overlap-audit-json">
+<title>git-overlap-audit-json</title>
+<rect x="0.5" y="0.5" width="833" height="560" rx="8" fill="#0d1117" stroke="#30363d"/>
+<path d="M0.5 34V8.5a8 8 0 0 1 8-8h817a8 8 0 0 1 8 8V34z" fill="#161b22"/>
+<circle cx="18" cy="17" r="6" fill="#ff5f57"/>
+<circle cx="38" cy="17" r="6" fill="#febc2e"/>
+<circle cx="58" cy="17" r="6" fill="#28c840"/>
+<text x="417.0" y="21" text-anchor="middle" fill="#8b949e" font-family="ui-sans-serif, system-ui, sans-serif" font-size="12">git-overlap-audit-json</text>
+<g font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="14">
+<text x="18" y="62" fill="#7ee787">$ printf 'feature/triage-bot\nfix/login-typo\n' | git footprint main | git overlap --audit-json</text>
+<text x="18" y="82" fill="#e6edf3">{</text>
+<text x="18" y="102" fill="#e6edf3">  "errors": [],</text>
+<text x="18" y="122" fill="#e6edf3">  "exit": 1,</text>
+<text x="18" y="142" fill="#e6edf3">  "findings": [</text>
+<text x="18" y="162" fill="#e6edf3">    {</text>
+<text x="18" y="182" fill="#e6edf3">      "evidence": {</text>
+<text x="18" y="202" fill="#e6edf3">        "path": "app.py",</text>
+<text x="18" y="222" fill="#e6edf3">        "ref": "feature/triage-bot"</text>
+<text x="18" y="242" fill="#e6edf3">      },</text>
+<text x="18" y="262" fill="#e6edf3">      "message": "feature/triage-bot and fix/login-typo both change app.py",</text>
+<text x="18" y="282" fill="#e6edf3">      "record": {</text>
+<text x="18" y="302" fill="#e6edf3">        "path": "app.py",</text>
+<text x="18" y="322" fill="#e6edf3">        "ref_a": "feature/triage-bot",</text>
+<text x="18" y="342" fill="#e6edf3">        "ref_b": "fix/login-typo"</text>
+<text x="18" y="362" fill="#e6edf3">      },</text>
+<text x="18" y="382" fill="#e6edf3">      "rule": "git-overlap.overlap",</text>
+<text x="18" y="402" fill="#e6edf3">      "severity": "low"</text>
+<text x="18" y="422" fill="#e6edf3">    }</text>
+<text x="18" y="442" fill="#e6edf3">  ],</text>
+<text x="18" y="462" fill="#e6edf3">  "format": "audit-result/1",</text>
+<text x="18" y="482" fill="#e6edf3">  "target": {</text>
+<text x="18" y="502" fill="#e6edf3">    "kind": "repository",</text>
+<text x="18" y="522" fill="#e6edf3">  … 7 more lines</text>
+<text x="18" y="542" fill="#8b949e"># exit status 1</text>
+</g></svg>
