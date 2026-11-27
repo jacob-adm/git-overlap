@@ -19,11 +19,11 @@ git-overlap was inspired by Xuchen Yao's article
 
 A demo repository with two branches that both edit `app.py`:
 
-![git footprint piped to git overlap, reporting one shared file](https://raw.githubusercontent.com/jacob-adm/git-overlap/main/docs/screenshots/git-overlap.svg)
+<p align="center"><img src="https://raw.githubusercontent.com/jacob-adm/git-overlap/main/docs/screenshots/git-overlap.svg" alt="git footprint piped to git overlap, reporting one shared file"></p>
 
 The same pair with `--audit-json` (first lines of the result):
 
-![git overlap --audit-json output](https://raw.githubusercontent.com/jacob-adm/git-overlap/main/docs/screenshots/git-overlap-audit-json.svg)
+<p align="center"><img src="https://raw.githubusercontent.com/jacob-adm/git-overlap/main/docs/screenshots/git-overlap-audit-json.svg" alt="git overlap --audit-json output"></p>
 
 ## Requirements
 
