@@ -1,6 +1,6 @@
 # git-overlap
 
-[![Test](https://github.com/jacob-adm/git-overlap/actions/workflows/test.yml/badge.svg?branch=main)](https://github.com/jacob-adm/git-overlap/actions/workflows/test.yml) [![PyPI](https://img.shields.io/pypi/v/git-overlap?style=flat-square&color=0F6378&label=PyPI)](https://pypi.org/project/git-overlap/) [![Python](https://img.shields.io/python/required-version-toml?tomlFilePath=https://raw.githubusercontent.com/jacob-adm/git-overlap/main/pyproject.toml&style=flat-square&color=0F6378&label=python)](https://github.com/jacob-adm/git-overlap/blob/main/pyproject.toml) [![Licence](https://img.shields.io/pypi/l/git-overlap?style=flat-square&color=0F6378&label=licence)](https://github.com/jacob-adm/git-overlap#license)
+[![PyPI](https://img.shields.io/pypi/v/git-overlap?style=flat-square&color=0F6378&label=PyPI)](https://pypi.org/project/git-overlap/) [![Python](https://img.shields.io/python/required-version-toml?tomlFilePath=https://raw.githubusercontent.com/jacob-adm/git-overlap/main/pyproject.toml&style=flat-square&color=0F6378&label=python)](https://github.com/jacob-adm/git-overlap/blob/main/pyproject.toml) [![Licence](https://img.shields.io/pypi/l/git-overlap?style=flat-square&color=0F6378&label=licence)](https://github.com/jacob-adm/git-overlap#license)
 
 git-overlap is a package of three git commands: `git footprint`, `git overlap` and
 `git pairmerge`. Installing it puts `git-footprint`, `git-overlap` and `git-pairmerge` on your
